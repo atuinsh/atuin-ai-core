@@ -1,0 +1,29 @@
+{
+  "version": "1.0",
+  "_note": "Synthetic (not recorded): an OpenRouter mid-stream error chunk, for tests that need a deterministic provider failure. Shape mirrors the recorded fixtures in the sibling directories.",
+  "entries": [
+    {
+      "request": {
+        "method": "POST",
+        "scheme": "https",
+        "host": "openrouter.ai",
+        "port": null,
+        "path": "/api/v1/chat/completions",
+        "query": null,
+        "headers": [],
+        "body": ""
+      },
+      "response": {
+        "mode": "streaming",
+        "status": 200,
+        "headers": [],
+        "chunks": [
+          {
+            "data": "data: {\"error\": {\"code\": 503, \"message\": \"Provider unavailable\"}}\n\n",
+            "delay_ms": 0
+          }
+        ]
+      }
+    }
+  ]
+}

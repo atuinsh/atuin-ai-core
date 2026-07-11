@@ -1,0 +1,33 @@
+name = "cli_chat_core"
+version = "0.1.0"
+target = "erlang"
+
+# The host-agnostic CLI chat engine: domain logic, the turn loop, the LLM
+# provider adapters, and the host-agnostic HTTP layer (controller, driver,
+# streaming). Consumed by the Atuin Hub Phoenix app and the standalone
+# self-hosted server, each of which composes an `instance.Instance` and
+# serves `controller.serve`.
+#
+# Modules keep their historical `atuin_hub/...` paths for now so compiled
+# module names (the Elixir FFI contract) survive the extraction unchanged;
+# the namespace gets renamed when the package is published under its
+# public name.
+#
+# Runtime host requirements beyond hex deps: the `plug_ffi`/`callers_ffi`
+# Erlang modules call `Elixir.Plug.Conn`, so the consuming application
+# must run on Elixir with Plug available.
+
+[dependencies]
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
+gleam_regexp = ">= 1.0.0 and < 2.0.0"
+gleam_http = ">= 4.3.0 and < 5.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+gleam_erlang = ">= 1.3.0 and < 2.0.0"
+dream_http_client = ">= 3.0.1 and < 4.0.0"
+ssevents = ">= 0.14.0 and < 1.0.0"
+gleam_yielder = ">= 1.1.0 and < 2.0.0"
+
+[dev-dependencies]
+envoy = ">= 1.2.0 and < 2.0.0"
+gleeunit = ">= 1.0.0 and < 2.0.0"
+simplifile = ">= 2.5.0 and < 3.0.0"

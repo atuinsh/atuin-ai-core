@@ -1,0 +1,165 @@
+{
+  "version": "1.0",
+  "entries": [
+    {
+      "request": {
+        "method": "POST",
+        "scheme": "https",
+        "host": "api.fireworks.ai",
+        "port": null,
+        "path": "/inference/v1/chat/completions",
+        "query": null,
+        "headers": [
+          [
+            "x-openrouter-title",
+            "Atuin AI"
+          ],
+          [
+            "http-referer",
+            "https://atuin.sh"
+          ],
+          [
+            "x-session-id",
+            "fixture-capture"
+          ],
+          [
+            "content-type",
+            "application/json"
+          ],
+          [
+            "authorization",
+            "Bearer [REDACTED]"
+          ]
+        ],
+        "body": "{\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"suggest_command\",\"description\":\"Suggest a shell command to the user. The command is displayed in the user's terminal\\nwhere they can choose to run it. Provide the command with a description, confidence,\\nand danger assessment.\\n\\nOnly call this tool when you have a command to suggest. For pure conversation\\n(answers, clarifying questions, explanations), respond with plain text instead.\\n\",\"parameters\":{\"type\":\"object\",\"properties\":{\"command\":{\"description\":\"The shell command to suggest to the user\",\"type\":\"string\"},\"description\":{\"description\":\"Brief description of the command\",\"type\":\"string\"},\"confidence\":{\"description\":\"Confidence level in the suggested command\",\"enum\":[\"high\",\"med\",\"low\"],\"type\":\"string\"},\"confidence_notes\":{\"description\":\"Brief explanation of confidence level\",\"type\":\"string\"},\"danger\":{\"description\":\"Safety level: high = destructive/sudo, med = modifies files, low = safe read-only\",\"enum\":[\"high\",\"med\",\"low\"],\"type\":\"string\"},\"danger_notes\":{\"description\":\"Brief explanation of safety concerns (e.g., 'deletes files recursively')\",\"type\":\"string\"}},\"required\":[\"command\",\"description\",\"confidence\",\"danger\"]}}},{\"type\":\"function\",\"function\":{\"name\":\"read_file\",\"description\":\"Reads the contents of a file or directory on the user's system. Use this to\\nget context from configuration files, code files, or any relevant text files\\nthat can help you understand the user's environment and provide better\\nsuggestions, answers, or assistance. Each line is prefixed with its line\\nnumber in the file, starting from 1, followed by a `\\\\t` (tab) character.\\n\",\"parameters\":{\"type\":\"object\",\"properties\":{\"file_path\":{\"description\":\"The path to the file or directory to read, relative to the current directory or absolute\",\"type\":\"string\"},\"limit\":{\"description\":\"Maximum number of lines to read from the file (default: 100, max 1000). Ignored if reading a directory.\",\"minimum\":1,\"maximum\":1000,\"type\":\"integer\"},\"offset\":{\"description\":\"Number of lines to skip from the start of the file before reading (default: 0). Ignored if reading a directory.\",\"type\":\"integer\"}},\"required\":[\"file_path\"]}}},{\"type\":\"function\",\"function\":{\"name\":\"edit_file\",\"description\":\"Edits a file on the user's system by replacing an exact string match with new\\ncontent. The file MUST have been read first using read_file \u2014 edits to unread\\nfiles will be rejected.\\n\\nThe old_string must match the file content exactly, including whitespace and\\nindentation. By default, old_string must appear exactly once in the file. If\\nit appears multiple times and you want to replace all of them, set replace_all\\nto true. If it appears multiple times and you only want to replace one, provide\\nmore surrounding context in old_string to make the match unique.\\n\\nUse this for targeted edits to existing files \u2014 especially configuration files\\nwhere preserving comments, formatting, and key ordering matters. For creating\\nnew files, use write_file instead.\\n\\nIf you get an error saying the file was modified since read, call read_file\\nagain to get the current contents before retrying the edit.\\n\",\"parameters\":{\"type\":\"object\",\"properties\":{\"file_path\":{\"description\":\"The path to the file to edit, relative to the current directory or absolute\",\"type\":\"string\"},\"old_string\":{\"description\":\"The exact text to find in the file. Must match byte-for-byte including whitespace and indentation.\",\"type\":\"string\"},\"new_string\":{\"description\":\"The text to replace old_string with\",\"type\":\"string\"},\"replace_all\":{\"description\":\"If true, replace all occurrences of old_string. If false (default), old_string must appear exactly once.\",\"type\":\"boolean\"}},\"required\":[\"file_path\",\"old_string\",\"new_string\"]}}},{\"type\":\"function\",\"function\":{\"name\":\"write_file\",\"description\":\"Creates a new file or overwrites an existing file on the user's system.\\nUse this to write complete file contents when creating new files or when\\nthe entire content needs to be replaced.\\n\\nFor new files: just provide file_path and content. Parent directories will\\nbe created automatically.\\n\\nFor existing files: you MUST set overwrite to true. If the file exists and\\noverwrite is not set, an error will be returned. Consider using edit_file\\ninstead if you only need to change a small part of an existing file \u2014 it\\npreserves formatting and is safer for config files.\\n\",\"parameters\":{\"type\":\"object\",\"properties\":{\"file_path\":{\"description\":\"The path to the file to write, relative to the current directory or absolute\",\"type\":\"string\"},\"content\":{\"description\":\"The complete content to write to the file\",\"type\":\"string\"},\"overwrite\":{\"description\":\"Must be set to true to overwrite an existing file. If false (default), writing to an existing file will return an error.\",\"type\":\"boolean\"}},\"required\":[\"file_path\",\"content\"]}}},{\"type\":\"function\",\"function\":{\"name\":\"atuin_history\",\"description\":\"Searches the user's Atuin command history for relevant past commands.\\nUse this when multiple commands might be relevant and you want to know what\\ntools the user uses most, or when the user references a previously run\\ncommand that you don't have the details for.\\n\\nThere are multiple filter modes to choose from; opt for the least intrusive\\nunless there's a good reason to use a more general mode:\\n* workspace - only search commands from the current git project\\n  E.g. \\\"when did the tests last pass?\\\" -> the user is probably referring to recent test commands in this project\\n* directory - only search commands run from the current directory\\n  Usually similar to workspace but without git context; can be useful if the user is asking about\\n  commands they've run in this part of the filesystem, but workspace is usually more appropriate\\n* session - only search commands from the current shell session\\n  E.g. \\\"why did that command fail?\\\" -> the user is probably referring to the most recent command in that session\\n* host - search all commands from the current machine, regardless of session or directory\\n  E.g. \\\"when did I last restart postgresql?\\\" -> the user is probably referring to any command they've run to restart\\n  postgresql on this machine, not just in this project or session\\n* global - search all commands from all machines\\n  E.g. \\\"what's the most common way I use docker?\\\" -> the user is probably referring to their overall docker usage,\\n  not just in this project or session\\n\",\"parameters\":{\"type\":\"object\",\"properties\":{\"query\":{\"description\":\"Search query to find relevant commands in history; use empty string to return most recent commands\",\"type\":\"string\"},\"limit\":{\"description\":\"Maximum number of results to return (default: 10)\",\"minimum\":1,\"maximum\":50,\"type\":\"integer\"},\"filter_modes\":{\"description\":\"A list of filter modes, in order of priority. The first allowed mode will be returned.\",\"type\":\"array\",\"items\":{\"enum\":[\"workspace\",\"directory\",\"session\",\"host\",\"global\"],\"type\":\"string\"}}},\"required\":[\"query\",\"filter_modes\"]}}},{\"type\":\"function\",\"function\":{\"name\":\"atuin_output\",\"description\":\"Looks up the full output of a command from the user's Atuin history. Use this after `atuin_history`\\nto read the captured stdout/stderr for a specific history entry. Each history entry has an `id` field \u2014 pass\\nthat as `history_id` to retrieve the output.\\n\\nUse `ranges` to request specific line ranges from the output. Each range is a `[start, end]` pair\\nwhere both indices are 0-based and inclusive. Negative indices count from the end: `-1` is the last\\nline, `-200` is the 200th-from-last.\\n\\nCommon patterns:\\n* First look: `[[0, 100], [-200, -1]]` \u2014 head and tail in one call\\n* Entire output: `[[0, -1]]` \u2014 use sparingly and only when total length is already known or expected to be small\\n* Drill into middle: `[[250, 275]]`\\n* Combination: `[[0, 50], [250, 275], [-100, -1]]`\\n\\nThe returned output has line numbers prefixed (starting from 1) followed by a tab character, just like `read_file`,\\nto help you correlate it with the original command output and refer back to specific lines in your response.\\n\",\"parameters\":{\"type\":\"object\",\"properties\":{\"history_id\":{\"description\":\"The history entry ID returned by the atuin_history tool\",\"type\":\"string\"},\"ranges\":{\"description\":\"Array of [start, end] line ranges (0-based, inclusive, negative = from end). Default: [[0, 1000]]. Max 10 ranges per call.\",\"maxItems\":10,\"type\":\"array\",\"items\":{\"minItems\":2,\"maxItems\":2,\"type\":\"array\",\"items\":{\"type\":\"integer\"}}}},\"required\":[\"history_id\"]}}},{\"type\":\"function\",\"function\":{\"name\":\"execute_shell_command\",\"description\":\"Executes a shell command on the user's system and returns the output. Use this\\nto run commands that can provide information or context that helps you answer\\nthe user's question or fulfill their request. Be cautious with this tool, as\\nit can have side effects on the user's system. Always prefer read-only commands\\nand avoid destructive actions unless absolutely necessary and you have high\\nconfidence it's what the user wants.\\n\\nDo not use this tool when another tool - like read_file or edit_file - would be\\nmore appropriate, unless you have a good reason to do so.\\n\\nIMPORTANT: do *NOT* use this tool if simply suggesting a command for the user\\nto run themselves would suffice. This tool should only be used when you need\\nto get information from the user's system that you can't get through other\\ntools, and that is necessary to answer the user's question or fulfill their\\nrequest OR the user has a preference for you to run commands directly:\\n\\n- \\\"How do I find the largest file in this directory\\\" -> Suggest a command instead\\n- \\\"What is the largest file in this directory\\\" -> Answer the question using a tool call\\n\",\"parameters\":{\"type\":\"object\",\"properties\":{\"command\":{\"description\":\"The shell command to execute. Use this to get information from the user's system that can help you answer their question or fulfill their request. Be cautious and prefer read-only commands when possible.\",\"type\":\"string\"},\"shell\":{\"description\":\"Which shell to use for execution\",\"enum\":[\"bash\",\"fish\",\"zsh\",\"nu\"],\"type\":\"string\"},\"timeout\":{\"description\":\"Maximum time in seconds to allow the command to run before cancelling it (default: 30, max: 600)\",\"minimum\":1,\"maximum\":600,\"type\":\"integer\"},\"description\":{\"description\":\"Brief description of why you need to run this command or what information you're trying to get from it\",\"type\":\"string\"}},\"required\":[\"command\",\"shell\",\"description\"]}}},{\"type\":\"function\",\"function\":{\"name\":\"load_skill\",\"description\":\"Loads the full content of a skill by name. Skills are user-defined instruction\\nsets (playbooks, conventions, workflows) that the user has configured on their\\nsystem. The available skills and their descriptions are listed in the system\\nprompt. Use this tool when a skill's instructions are relevant to the current\\ntask. The tool returns the skill's full body content with any embedded shell\\ncommands already executed and substituted.\\n\",\"parameters\":{\"type\":\"object\",\"properties\":{\"name\":{\"description\":\"The name of the skill to load, as listed in the available skills\",\"type\":\"string\"}},\"required\":[\"name\"]}}}],\"stream\":true,\"parallel_tool_calls\":true,\"model\":\"anthropic/claude-sonnet-4.6\",\"messages\":[{\"role\":\"user\",\"content\":[{\"cache_control\":{\"type\":\"ephemeral\"},\"type\":\"text\",\"text\":\"Use the suggest_command tool to suggest a shell command that lists all files in the current directory, including hidden ones.\"}]}]}"
+      },
+      "response": {
+        "mode": "streaming",
+        "status": 200,
+        "headers": [],
+        "chunks": [
+          {
+            "data": ": OPENROUTER PROCESSING\n\n: OPENROUTER PROCESSING\n\ndata: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"toolu_bdrk_01X5X6iYuzmQDSVJ8W2XWhPW\",\"type\":\"function\",\"function\":{\"name\":\"suggest_command\",\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\ndata: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 0
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"command\\\": \\\"ls -\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 21
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"la\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 62
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\", \\\"description\\\": \\\"List all files in the current directory\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 132
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\", including hidden ones\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 48
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\",\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 648
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\" in\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 3
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\" long\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 6
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\" format\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 12
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\", \\\"confidence\\\": \\\"high\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 11
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\", \\\"danger\\\": \\\"low\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 6
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\", \\\"danger_notes\\\": \\\"Read\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 8
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"-only command,\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 30
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\" no\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 51
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\" modifications\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 51
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\" to\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 50
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\" the\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 38
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\" filesystem\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 49
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\", \\\"confidence_notes\\\": \\\"ls\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 141
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\" -la is\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 48
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\" a standard\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 52
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\",\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 45
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\" well-known command for\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 48
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\" listing all\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 48
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\" files including\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 54
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\" hidden ones\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 657
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"}\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}\n\n",
+            "delay_ms": 28
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\",\"role\":\"assistant\"},\"finish_reason\":\"tool_calls\",\"native_finish_reason\":\"tool_use\"}]}\n\n",
+            "delay_ms": 29
+          },
+          {
+            "data": "data: {\"id\":\"gen-1782948085-ChoeSyb7sRudQ7xUoQlX\",\"object\":\"chat.completion.chunk\",\"created\":1782948085,\"model\":\"anthropic/claude-4.6-sonnet-20260217\",\"provider\":\"Amazon Bedrock\",\"service_tier\":null,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\",\"role\":\"assistant\"},\"finish_reason\":\"tool_calls\",\"native_finish_reason\":\"tool_use\"}],\"usage\":{\"prompt_tokens\":3439,\"completion_tokens\":185,\"total_tokens\":3624,\"cost\":0.015669,\"is_byok\":false,\"prompt_tokens_details\":{\"cached_tokens\":0,\"cache_write_tokens\":3436,\"audio_tokens\":0,\"video_tokens\":0},\"cost_details\":{\"upstream_inference_cost\":0.015669,\"upstream_inference_prompt_cost\":0.012894,\"upstream_inference_completions_cost\":0.002775},\"completion_tokens_details\":{\"reasoning_tokens\":0,\"image_tokens\":0,\"audio_tokens\":0}}}\n\ndata: [DONE]\n\n",
+            "delay_ms": 12
+          },
+          {
+            "data": "",
+            "delay_ms": 1
+          }
+        ]
+      }
+    }
+  ]
+}
