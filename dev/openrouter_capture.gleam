@@ -23,6 +23,8 @@ import envoy
 import gleam/io
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
+import simplifile
 
 pub fn main() {
   let assert Ok(api_key) = envoy.get("OPENROUTER_API_KEY")
@@ -112,11 +114,9 @@ fn capture_with_model(
 ) -> Nil {
   io.println("== capturing " <> scenario)
 
+  let directory = "test/fixtures/openrouter/" <> scenario
   let assert Ok(rec) =
-    recorder.start(
-      recorder.Record(directory: "test/fixtures/openrouter/" <> scenario),
-      matching.match_url_only(),
-    )
+    recorder.start(recorder.Record(directory:), matching.match_url_only())
 
   let options =
     openrouter.OpenRouterOptions(
@@ -179,8 +179,32 @@ fn capture_with_model(
     Ok(stream) -> {
       dream.await_stream(stream)
       let _ = recorder.stop(rec)
-      Nil
+      redact_api_key(directory, api_key)
     }
     Error(reason) -> io.println_error("failed to start stream: " <> reason)
   }
+}
+
+// The recorder writes requests verbatim, so captured files contain the
+// real Authorization header; scrub the key before the fixture can be
+// committed. Safe to rewrite: replay matching is URL-only, so headers
+// are never compared.
+fn redact_api_key(directory: String, api_key: String) -> Nil {
+  let assert Ok(files) = simplifile.get_files(directory)
+  list.each(files, fn(path) {
+    case simplifile.read(path) {
+      Ok(content) -> {
+        let assert Ok(_) =
+          simplifile.write(
+            path,
+            string.replace(content, api_key, "test-fixture-redacted"),
+          )
+        Nil
+      }
+      Error(_) ->
+        io.println_error(
+          "could not read " <> path <> " for redaction - SCRUB IT MANUALLY",
+        )
+    }
+  })
 }
