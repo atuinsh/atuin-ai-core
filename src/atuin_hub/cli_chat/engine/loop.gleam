@@ -750,5 +750,10 @@ fn describe_error(error: stream.ProviderError) -> #(String, String, String) {
       "internal_error",
       "internal_error",
     )
+    stream.TransportFailed(detail) -> #(
+      "LLM request failed: " <> detail,
+      "upstream_error",
+      "upstream_error",
+    )
   }
 }

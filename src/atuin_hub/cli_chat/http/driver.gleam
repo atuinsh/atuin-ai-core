@@ -40,6 +40,7 @@ import dream_http_client/client as dream
 import gleam/bytes_tree
 import gleam/dynamic
 import gleam/erlang/process.{type Pid, type Subject}
+import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/yielder
@@ -255,7 +256,12 @@ fn await(
             driver,
             state,
             loop.FromStream(
-              engine_stream.StreamFailedEvent(engine_stream.StreamCrashed, None),
+              engine_stream.StreamFailedEvent(
+                engine_stream.TransportFailed(
+                  "the LLM stream ended before the response completed",
+                ),
+                None,
+              ),
               elapsed_ms(driver),
             ),
           )
@@ -295,7 +301,14 @@ fn handle_deadline(
         driver,
         state,
         loop.FromStream(
-          engine_stream.StreamFailedEvent(engine_stream.StreamCrashed, None),
+          engine_stream.StreamFailedEvent(
+            engine_stream.TransportFailed(
+              "no activity from the LLM stream within "
+              <> int.to_string(inactivity_timeout_ms / 1000)
+              <> "s",
+            ),
+            None,
+          ),
           elapsed,
         ),
       )
@@ -506,9 +519,9 @@ fn decode_chunk(
   chunk: Result(BitArray, String),
 ) -> #(Pipeline, List(engine_stream.StreamEvent)) {
   case chunk {
-    Error(_reason) ->
+    Error(reason) ->
       apply_adapter_events(pipeline, [
-        engine_stream.StreamFailed(engine_stream.StreamCrashed),
+        engine_stream.StreamFailed(engine_stream.TransportFailed(reason)),
       ])
     Ok(bytes) ->
       case ssevents.push(pipeline.sse, bytes) {
