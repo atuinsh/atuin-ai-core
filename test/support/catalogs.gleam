@@ -3,7 +3,7 @@
 //// hidden experimental alias — for tests that need realistic alias
 //// resolution without depending on any deployment's data.
 
-import atuin_hub/cli_chat/domain/models.{Catalog, ModelAlias}
+import atuin_ai_core/domain/models.{Catalog, ModelAlias}
 import gleam/option.{None, Some}
 
 pub fn catalog() -> models.Catalog {

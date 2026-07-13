@@ -1,7 +1,7 @@
 //// Dev harness: captures real OpenRouter SSE streams as dream_http_client
 //// recordings, for use as decoder fixtures.
 ////
-//// Run from gleam_cli_chat/ with OPENROUTER_API_KEY set:
+//// Run from the repository root with OPENROUTER_API_KEY set:
 ////
 ////     gleam run -m openrouter_capture
 ////
@@ -9,13 +9,13 @@
 //// full request, INCLUDING the authorization header — scrub it before
 //// committing.
 
-import atuin_hub/cli_chat/domain/capabilities
-import atuin_hub/cli_chat/domain/tools
-import atuin_hub/cli_chat/domain/tools/web_scrape
-import atuin_hub/cli_chat/domain/tools/web_search
-import atuin_hub/cli_chat/http/request
-import atuin_hub/cli_chat/llm/client as chat
-import atuin_hub/cli_chat/llm/openrouter
+import atuin_ai_core/domain/capabilities
+import atuin_ai_core/domain/tools
+import atuin_ai_core/domain/tools/web_scrape
+import atuin_ai_core/domain/tools/web_search
+import atuin_ai_core/http/request
+import atuin_ai_core/llm/client as chat
+import atuin_ai_core/llm/openrouter
 import dream_http_client/client as dream
 import dream_http_client/matching
 import dream_http_client/recorder

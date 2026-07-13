@@ -1,21 +1,16 @@
-name = "cli_chat_core"
+name = "atuin_ai_core"
 version = "0.1.0"
+licences = ["Apache-2.0"]
 target = "erlang"
 
-# The host-agnostic CLI chat engine: domain logic, the turn loop, the LLM
-# provider adapters, and the host-agnostic HTTP layer (controller, driver,
-# streaming). Consumed by the Atuin Hub Phoenix app and the standalone
-# self-hosted server, each of which composes an `instance.Instance` and
-# serves `controller.serve`.
+# The host-agnostic Atuin AI chat engine: domain logic, the turn loop,
+# the LLM provider adapters, and the HTTP layer (controller, driver,
+# streaming). A deployment composes an `instance.Instance` and serves
+# `controller.serve`.
 #
-# Modules keep their historical `atuin_hub/...` paths for now so compiled
-# module names (the Elixir FFI contract) survive the extraction unchanged;
-# the namespace gets renamed when the package is published under its
-# public name.
-#
-# Runtime host requirements beyond hex deps: the `plug_ffi`/`callers_ffi`
-# Erlang modules call `Elixir.Plug.Conn`, so the consuming application
-# must run on Elixir with Plug available.
+# Runtime host requirements beyond hex deps: the `atuin_ai_plug_ffi` /
+# `atuin_ai_callers_ffi` Erlang modules call `Elixir.Plug.Conn`, so the
+# consuming application must run on Elixir with Plug available.
 
 [dependencies]
 gleam_stdlib = ">= 1.0.0 and < 2.0.0"
