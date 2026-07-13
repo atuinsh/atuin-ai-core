@@ -2,7 +2,7 @@
 # You typically do not need to edit this file
 
 packages = [
-  { name = "dream_http_client", version = "3.0.1", build_tools = ["gleam"], requirements = ["gleam_crypto", "gleam_erlang", "gleam_http", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_yielder", "simplifile"], source = "git", repo = "https://github.com/atuinsh/dream_http_client.git", commit = "92a18eb3eb6d1834d2266fe9234b677a1c49098f" },
+  { name = "dream_http_client", version = "3.0.1", build_tools = ["gleam"], requirements = ["gleam_crypto", "gleam_erlang", "gleam_http", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_yielder", "simplifile"], source = "git", repo = "https://github.com/atuinsh/dream_http_client.git", commit = "9ad9e2867ba3c525799406c82bf68186398c87e8" },
   { name = "envoy", version = "1.2.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "envoy", source = "hex", outer_checksum = "9C6FBB6BFA02A52798BEEC5977A738CAD6E4A057F4B67FD0C8061AD2502C191A" },
   { name = "filepath", version = "1.1.2", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "filepath", source = "hex", outer_checksum = "B06A9AF0BF10E51401D64B98E4B627F1D2E48C154967DA7AF4D0914780A6D40A" },
   { name = "gleam_crypto", version = "1.6.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_crypto", source = "hex", outer_checksum = "2DE9E4EF53CF6FEE049D4F765731F7178F7A11AEFAE00EEE63BF7536B354AD3F" },
@@ -19,7 +19,7 @@ packages = [
 ]
 
 [requirements]
-dream_http_client = { git = "https://github.com/atuinsh/dream_http_client.git", ref = "3.0.1-atuin.2" }
+dream_http_client = { git = "https://github.com/atuinsh/dream_http_client.git", ref = "3.0.1-atuin.3" }
 envoy = { version = ">= 1.2.0 and < 2.0.0" }
 gleam_erlang = { version = ">= 1.3.0 and < 2.0.0" }
 gleam_http = { version = ">= 4.3.0 and < 5.0.0" }
