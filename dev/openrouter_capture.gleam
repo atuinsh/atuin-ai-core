@@ -5,9 +5,8 @@
 ////
 ////     gleam run -m openrouter_capture
 ////
-//// Recordings land in test/fixtures/openrouter/<scenario>/. They contain the
-//// full request, INCLUDING the authorization header — scrub it before
-//// committing.
+//// Recordings land in test/fixtures/openrouter/<scenario>/. The
+//// authorization header is scrubbed automatically after each capture.
 
 import atuin_ai_core/domain/capabilities
 import atuin_ai_core/domain/tools
