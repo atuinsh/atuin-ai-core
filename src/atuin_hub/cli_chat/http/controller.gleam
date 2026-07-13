@@ -113,6 +113,8 @@ pub fn serve(
     // recorded as usage — nothing was generated. Failures *during* a turn
     // are recorded by record_outcome via the Failed outcome.
     Error(ChatControllerPhaseError(phase, error)) -> {
+      log.error("Error during request: " <> string.inspect(error))
+
       case error, phase {
         Disconnected, _ -> conn
         _, PreStreaming ->
@@ -221,6 +223,7 @@ fn do_chat(
       inst.tool_results.fetch(env.user_id, tool_use_id)
     })
 
+  log.debug("Starting LLM loop")
   let result =
     driver.run(
       conn,
