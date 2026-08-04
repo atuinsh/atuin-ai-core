@@ -54,6 +54,8 @@ pub type Event {
     computed_cost: Option(Int),
     provider_cost: Option(Int),
     duration_ms: Option(Int),
+    /// Time to first token; set on llm_response events only.
+    ttft_ms: Option(Int),
   )
 }
 
@@ -78,5 +80,6 @@ pub fn event(
     computed_cost: None,
     provider_cost: None,
     duration_ms: None,
+    ttft_ms: None,
   )
 }

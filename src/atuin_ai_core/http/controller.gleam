@@ -393,6 +393,7 @@ fn record_billed(
       instruction:,
       response:,
       tool_call_names: tool_call_names(responses),
+      ttfts: responses.ttfts,
       usage: turn_usage,
       billing: computed,
     ),

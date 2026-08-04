@@ -25,7 +25,7 @@ import atuin_ai_core/engine/turn.{
 }
 import gleam/dynamic.{type Dynamic}
 import gleam/list
-import gleam/option.{type Option}
+import gleam/option.{type Option, None, Some}
 
 const max_tool_iterations = 10
 
@@ -129,6 +129,10 @@ pub type TraceEvent {
     tool_calls: List(ToolCall),
     usage: Usage,
     duration_ms: Int,
+    /// Time to first token: elapsed from the call's start to its first
+    /// generated output (text, reasoning, or a tool call). None when the
+    /// stream finished without producing any.
+    ttft_ms: Option(Int),
   )
   ToolExecuted(
     iteration: Int,
@@ -155,7 +159,13 @@ pub type Outcome {
 
 /// Accumulated model output across loop iterations, for analytics.
 pub type Responses {
-  Responses(text: List(String), tool_calls: List(SummarizedToolCall))
+  Responses(
+    text: List(String),
+    tool_calls: List(SummarizedToolCall),
+    /// Time to first token of each LLM call, in call order — one entry
+    /// per call, None for a call that produced no output.
+    ttfts: List(Option(Int)),
+  )
 }
 
 /// The current iteration's generation, one of the orthogonal lifecycles a
@@ -189,6 +199,9 @@ pub type State {
   State(
     /// The in-flight generation, independent of tool execution.
     stream: StreamPhase,
+    /// Elapsed ms to the current call's first generated output, unset
+    /// until the first text/reasoning/tool-call event arrives.
+    ttft_ms: Option(Int),
     /// This iteration's server tools, in call order. The iteration
     /// completes when the stream has resolved AND every entry is resolved
     /// — a predicate over the lifecycles, not a linear phase.
@@ -228,6 +241,7 @@ pub fn start(
   let state =
     State(
       stream: Connecting,
+      ttft_ms: None,
       tools: [],
       pending_client_tools: [],
       assistant_text: "",
@@ -235,7 +249,7 @@ pub fn start(
       accumulated_usage: usage.zero(),
       iteration: 0,
       session_id: session_id,
-      responses: Responses(text: [], tool_calls: []),
+      responses: Responses(text: [], tool_calls: [], ttfts: []),
       client_connected: True,
       status: Active,
       is_server_tool:,
@@ -314,6 +328,7 @@ fn handle_stream_event(
   event: stream.StreamEvent,
   elapsed_ms: Int,
 ) -> #(State, Dispatch) {
+  let state = note_first_token(state, event, elapsed_ms)
   case event {
     stream.TextDelta(text) -> continue_streaming(state, [SendTextDelta(text)])
 
@@ -342,6 +357,23 @@ fn handle_stream_event(
 
     stream.StreamFailedEvent(error, partial_usage) ->
       fail(state, error, partial_usage)
+  }
+}
+
+// The call's first generated output — text, reasoning, or a tool call —
+// marks its time to first token. Bookkeeping events (interim usage, the
+// terminal events) don't count.
+fn note_first_token(
+  state: State,
+  event: stream.StreamEvent,
+  elapsed_ms: Int,
+) -> State {
+  case state.ttft_ms, event {
+    None, stream.TextDelta(_)
+    | None, stream.ReasoningDelta(_)
+    | None, stream.ToolCallStarted(_, _)
+    -> State(..state, ttft_ms: Some(elapsed_ms))
+    _, _ -> state
   }
 }
 
@@ -395,7 +427,7 @@ fn handle_llm_response(
       ..state,
       stream: StreamResolved,
       accumulated_usage: total,
-      responses: accumulate_responses(state.responses, response),
+      responses: accumulate_responses(state.responses, response, state.ttft_ms),
     )
 
   let warn = case no_usage_data {
@@ -411,6 +443,7 @@ fn handle_llm_response(
       tool_calls: response.tool_calls,
       usage: call_usage,
       duration_ms: duration_ms,
+      ttft_ms: state.ttft_ms,
     ))
 
   let #(state, dispatch) = case state.client_connected {
@@ -628,6 +661,7 @@ fn advance_iteration(state: State) -> #(State, Dispatch) {
           ..state,
           iteration: next,
           stream: Connecting,
+          ttft_ms: None,
           tools: [],
           pending_client_tools: [],
           assistant_text: "",
@@ -698,6 +732,7 @@ fn append_tool_exchange(
 fn accumulate_responses(
   responses: Responses,
   response: LlmResponse,
+  ttft_ms: Option(Int),
 ) -> Responses {
   let text = case response.text {
     "" -> responses.text
@@ -710,6 +745,7 @@ fn accumulate_responses(
       responses.tool_calls,
       list.map(response.tool_calls, turn.summarize),
     ),
+    ttfts: list.append(responses.ttfts, [ttft_ms]),
   )
 }
 

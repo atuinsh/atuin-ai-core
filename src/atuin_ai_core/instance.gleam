@@ -148,6 +148,9 @@ pub type BilledTurn {
     /// In execution order; names come from the server's tool whitelist,
     /// so they're metadata-safe under any policy.
     tool_call_names: List(String),
+    /// Time to first token of each LLM call, in call order — timing
+    /// metadata, safe under any content policy.
+    ttfts: List(Option(Int)),
     usage: Usage,
     billing: billing.Computed,
   )

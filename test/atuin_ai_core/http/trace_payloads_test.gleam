@@ -327,7 +327,7 @@ fn completion(policy) -> Dynamic {
     policy:,
     turn_usage: turn_usage(),
     summary: Some(session_summary()),
-    responses: loop.Responses(text: ["done"], tool_calls: []),
+    responses: loop.Responses(text: ["done"], tool_calls: [], ttfts: []),
     cancelled: False,
   )
 }
@@ -357,7 +357,7 @@ pub fn completion_without_summary_omits_key_test() {
       policy: MetadataOnly,
       turn_usage: turn_usage(),
       summary: None,
-      responses: loop.Responses(text: [], tool_calls: []),
+      responses: loop.Responses(text: [], tool_calls: [], ttfts: []),
       cancelled: True,
     )
 

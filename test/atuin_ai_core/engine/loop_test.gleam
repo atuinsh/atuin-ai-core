@@ -114,6 +114,40 @@ pub fn stream_deltas_are_forwarded_without_lifecycle_decisions_test() {
   assert dispatch == AwaitInput(sends: [])
 }
 
+pub fn ttft_is_captured_per_llm_call_test() {
+  let #(state, _) = loop.start("sess", conversation(), server_tools)
+
+  // Interim usage is bookkeeping, not output: it never stamps the ttft.
+  let #(state, _) =
+    loop.step(state, FromStream(stream.UsageReported(some_usage(1, 0)), 90))
+  // The first generated output does; later output leaves it alone.
+  let #(state, _) = loop.step(state, FromStream(stream.TextDelta("a"), 150))
+  let #(state, _) = loop.step(state, FromStream(stream.TextDelta("b"), 200))
+  let #(state, dispatch) =
+    loop.step(state, completed(text_response("   "), some_usage(3, 0)))
+
+  // The empty response retries; its trace still carries the call's ttft.
+  let assert AwaitEvent(
+    sends: [
+      EmitTrace(loop.LlmResponded(ttft_ms: Some(150), ..)),
+      EmitTrace(loop.LlmRequested(..)),
+      SendStatus(loop.Thinking),
+    ],
+    trigger: CallLlm(_, 1),
+  ) = dispatch
+
+  // The next call starts fresh: no output before completion, no ttft.
+  let #(state, dispatch) =
+    loop.step(state, completed(text_response("hello"), some_usage(10, 5)))
+  let assert Terminal(
+    sends: [EmitTrace(loop.LlmResponded(ttft_ms: None, ..)), SendDone(_)],
+    outcome: Success(usage: _, summary: _),
+  ) = dispatch
+
+  // Both calls' ttfts are accumulated, in call order.
+  assert loop.responses(state).ttfts == [Some(150), None]
+}
+
 pub fn streaming_tool_progress_is_forwarded_but_not_classified_test() {
   let #(state, _) = loop.start("sess", conversation(), server_tools)
   let call = search_call()
@@ -213,6 +247,7 @@ pub fn text_only_completes_the_turn_test() {
         tool_calls: [],
         usage: _,
         duration_ms: 42,
+        ttft_ms: None,
       )),
       SendDone(done_usage),
     ],

@@ -700,6 +700,7 @@ fn to_trace_event(ctx: Context, event: loop.TraceEvent) -> trace.Event {
       tool_calls:,
       usage:,
       duration_ms:,
+      ttft_ms:,
     ) ->
       trace.Event(
         ..trace.event(
@@ -717,6 +718,7 @@ fn to_trace_event(ctx: Context, event: loop.TraceEvent) -> trace.Event {
         cached_tokens: Some(usage.cached_tokens),
         cache_creation_tokens: Some(usage.cache_creation_tokens),
         duration_ms: Some(duration_ms),
+        ttft_ms:,
       )
 
     loop.ToolExecuted(iteration: _, event_order:, result:, input:, duration_ms:) ->
