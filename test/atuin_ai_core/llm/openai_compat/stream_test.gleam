@@ -158,16 +158,35 @@ pub fn error_chunk_maps_to_stream_failed_test() {
   assert decode_single(
       "{\"error\": {\"code\": 429, \"message\": \"slow down\"}}",
     )
-    == [engine_stream.StreamFailed(engine_stream.RateLimited)]
+    == [
+      engine_stream.StreamFailed(engine_stream.RateLimited(Some("slow down"))),
+    ]
   assert decode_single("{\"error\": {\"code\": 502, \"message\": \"bad\"}}")
-    == [engine_stream.StreamFailed(engine_stream.Unavailable)]
+    == [engine_stream.StreamFailed(engine_stream.Unavailable(Some("bad")))]
   assert decode_single("{\"error\": {\"message\": \"nope\"}}")
-    == [engine_stream.StreamFailed(engine_stream.GenerationFailed)]
+    == [
+      engine_stream.StreamFailed(engine_stream.GenerationFailed(Some("nope"))),
+    ]
+}
+
+pub fn error_chunk_detail_includes_upstream_provider_test() {
+  assert decode_single(
+      "{\"error\": {\"code\": 429, \"message\": \"slow down\", "
+      <> "\"metadata\": {\"provider_name\": \"openai\"}}}",
+    )
+    == [
+      engine_stream.StreamFailed(
+        engine_stream.RateLimited(Some("openai: slow down")),
+      ),
+    ]
 }
 
 pub fn malformed_chunk_maps_to_stream_failed_test() {
-  assert decode_single("this is not json")
-    == [engine_stream.StreamFailed(engine_stream.StreamProcessingFailed)]
+  let assert [
+    engine_stream.StreamFailed(engine_stream.StreamProcessingFailed(detail)),
+  ] = decode_single("this is not json")
+  let assert Some(detail) = detail
+  assert string.starts_with(detail, "undecodable provider chunk (16 bytes): ")
 }
 
 // --- Fireworks wire-shape tolerances (payloads captured from a live

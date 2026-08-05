@@ -41,6 +41,7 @@ import atuin_ai_core/http/limits.{
   type ChargeTarget, type CreditsSnapshot, type LimitCheckError,
 }
 import atuin_ai_core/http/trace.{type ContentPolicy}
+import atuin_ai_core/observe.{type Observer}
 import dream_http_client/client as dream
 import gleam/dynamic.{type Dynamic}
 import gleam/list
@@ -150,16 +151,28 @@ pub type BilledTurn {
     tool_call_names: List(String),
     usage: Usage,
     billing: billing.Computed,
+    /// Turn wall-clock duration and time to the turn's first content
+    /// token, measured from the start of the LLM call that produced it
+    /// (`None` if the turn produced no content).
+    duration_ms: Int,
+    ttft_ms: Option(Int),
   )
 }
 
 /// A failed turn — not charged, but kept with whatever tokens were
-/// consumed before the failure.
+/// consumed before the failure. `error_detail` is the operator-facing
+/// context the provider/transport supplied (never user content); the
+/// client only ever sees the generic message for `error_type`.
 pub type FailedTurn {
   FailedTurn(
     error_type: String,
+    error_detail: Option(String),
     instruction: Option(String),
     usage: Option(Usage),
+    /// Turn wall-clock duration up to the failure, and time to the first
+    /// token if any content arrived before the failure.
+    duration_ms: Int,
+    ttft_ms: Option(Int),
   )
 }
 
@@ -226,6 +239,9 @@ pub type Instance {
     limiter: Limiter,
     recorder: Recorder,
     tool_results: ToolResultStore,
+    /// Operational observability (TTFT, throughput, failure metrics) —
+    /// the sibling of `recorder`, which is analytical. See `observe`.
+    observer: Observer,
     /// The dream request each LLM call starts from — `dream.new` outside
     /// of tests, where a playback recorder is attached instead.
     base_request: dream.ClientRequest,
@@ -248,6 +264,7 @@ pub fn new(catalog: models.Catalog, backend: Backend) -> Instance {
     limiter: open_limiter(),
     recorder: null_recorder(),
     tool_results: inline_tool_results(),
+    observer: observe.null_observer(),
     base_request: dream.new,
   )
 }
@@ -297,6 +314,10 @@ pub fn with_limiter(instance: Instance, limiter: Limiter) -> Instance {
 
 pub fn with_recorder(instance: Instance, recorder: Recorder) -> Instance {
   Instance(..instance, recorder:)
+}
+
+pub fn with_observer(instance: Instance, observer: Observer) -> Instance {
+  Instance(..instance, observer:)
 }
 
 pub fn with_tool_result_store(

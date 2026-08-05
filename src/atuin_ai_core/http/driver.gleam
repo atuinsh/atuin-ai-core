@@ -36,7 +36,9 @@ import atuin_ai_core/llm/fireworks
 import atuin_ai_core/llm/openai_compat/stream as sse_stream
 import atuin_ai_core/llm/openai_endpoint
 import atuin_ai_core/llm/openrouter
+import atuin_ai_core/observe
 import dream_http_client/client as dream
+import gleam/bit_array
 import gleam/bytes_tree
 import gleam/dynamic
 import gleam/erlang/process.{type Pid, type Subject}
@@ -117,6 +119,20 @@ pub type Context {
     /// usage, or `None` if the snapshot can't be produced. Injected so the
     /// driver stays free of billing/limits knowledge.
     credits: fn(usage.Usage) -> Option(dynamic.Dynamic),
+    /// Sink for operational observations (TTFT, throughput, failures).
+    /// Fire-and-forget, like `trace`.
+    observe: fn(observe.Event) -> Nil,
+  )
+}
+
+/// Wall-clock measurements for one turn, recorded on the usage record.
+pub type TurnTiming {
+  TurnTiming(
+    duration_ms: Int,
+    /// Time to the turn's first content, measured from the start of the
+    /// LLM call that produced it (usually the first; an earlier call can
+    /// finish contentless). `None` when the turn produced no content.
+    ttft_ms: Option(Int),
   )
 }
 
@@ -127,6 +143,7 @@ pub type TurnResult {
     /// The loop's accumulated model output (text + summarized tool calls),
     /// recorded as the usage record's response.
     responses: loop.Responses,
+    timing: TurnTiming,
   )
 }
 
@@ -166,11 +183,38 @@ pub fn run(conn: PlugConn, ctx: Context) -> TurnResult {
       tools_outstanding: [],
       tool_tasks: [],
       callers: callers.callers(),
+      started_ms: clock.monotonic_ms(),
+      turn_ttft_ms: None,
     )
 
   let #(driver, outcome, responses) = drive(driver, state, dispatch)
-  kill_in_flight(driver)
-  TurnResult(conn: driver.conn, outcome:, responses:)
+  let duration_ms = clock.monotonic_ms() - driver.started_ms
+  // Cleanup before the final observation: the observer is fault-isolated
+  // (see emit), but stream/tool tasks shouldn't outlive the turn even so.
+  let driver = kill_in_flight(driver)
+  emit(
+    ctx.observe,
+    observe.TurnCompleted(
+      outcome: outcome_name(outcome),
+      duration_ms:,
+      llm_calls: driver.stream_id,
+    ),
+  )
+  TurnResult(
+    conn: driver.conn,
+    outcome:,
+    responses:,
+    timing: TurnTiming(duration_ms:, ttft_ms: driver.turn_ttft_ms),
+  )
+}
+
+fn outcome_name(outcome: loop.Outcome) -> String {
+  case outcome {
+    loop.Success(..) -> "success"
+    loop.Cancelled(..) -> "cancelled"
+    loop.PausedForClientTools(..) -> "paused"
+    loop.Failed(..) -> "failed"
+  }
 }
 
 type Driver {
@@ -193,6 +237,10 @@ type Driver {
     tools_outstanding: List(#(String, String)),
     tool_tasks: List(Pid),
     callers: callers.Callers,
+    /// Turn wall-clock start; `turn_ttft_ms` latches the first LLM call's
+    /// first-token time for the usage record.
+    started_ms: Int,
+    turn_ttft_ms: Option(Int),
   )
 }
 
@@ -203,6 +251,9 @@ type Pipeline {
     decoder: sse_stream.Decoder,
     fsm: engine_stream.StreamState,
     started_ms: Int,
+    /// First content (text, reasoning, or tool call) of this call, for
+    /// TTFT. `None` until content arrives.
+    first_token_ms: Option(Int),
   )
 }
 
@@ -268,20 +319,22 @@ fn await(
       let driver = Driver(..driver, stream_task: None)
       case state.stream {
         // The transport ended without a terminal provider event.
-        loop.Connecting | loop.Streaming ->
+        loop.Connecting | loop.Streaming -> {
+          let error =
+            engine_stream.TransportFailed(
+              "the LLM stream ended before the response completed",
+            )
+          let driver =
+            observe_failure(driver, state.iteration, error, elapsed_ms(driver))
           step(
             driver,
             state,
             loop.FromStream(
-              engine_stream.StreamFailedEvent(
-                engine_stream.TransportFailed(
-                  "the LLM stream ended before the response completed",
-                ),
-                None,
-              ),
+              engine_stream.StreamFailedEvent(error, None),
               elapsed_ms(driver),
             ),
           )
+        }
         // Trailing bytes after the loop already moved on; nothing to do.
         _ -> await(driver, state)
       }
@@ -289,6 +342,14 @@ fn await(
     Ok(StreamExhausted(_)) -> await(driver, state)
 
     Ok(ToolDone(result, duration_ms)) -> {
+      emit(
+        driver.ctx.observe,
+        observe.ServerToolCompleted(
+          name: result.name,
+          duration_ms:,
+          is_error: result.is_error,
+        ),
+      )
       let driver =
         Driver(
           ..driver,
@@ -313,39 +374,40 @@ fn handle_deadline(
   let driver = kill_in_flight(driver)
 
   case state.stream {
-    loop.Connecting | loop.Streaming ->
+    loop.Connecting | loop.Streaming -> {
+      let error =
+        engine_stream.TransportFailed(
+          "no activity from the LLM stream within "
+          <> int.to_string(inactivity_timeout_ms / 1000)
+          <> "s",
+        )
+      let driver = observe_failure(driver, state.iteration, error, elapsed)
       step(
         driver,
         state,
-        loop.FromStream(
-          engine_stream.StreamFailedEvent(
-            engine_stream.TransportFailed(
-              "no activity from the LLM stream within "
-              <> int.to_string(inactivity_timeout_ms / 1000)
-              <> "s",
-            ),
-            None,
-          ),
-          elapsed,
-        ),
+        loop.FromStream(engine_stream.StreamFailedEvent(error, None), elapsed),
       )
+    }
 
     // The stream is resolved, so the wait was on tools: complete each
     // outstanding one with an error result and let the loop's completion
     // predicate end the iteration.
     _ ->
       case outstanding {
-        [] ->
+        [] -> {
           // Waiting with nothing in flight is a driver bug; fail the turn
           // rather than wait forever.
+          let error = engine_stream.StreamCrashed
+          let driver = observe_failure(driver, state.iteration, error, elapsed)
           step(
             driver,
             state,
             loop.FromStream(
-              engine_stream.StreamFailedEvent(engine_stream.StreamCrashed, None),
+              engine_stream.StreamFailedEvent(error, None),
               elapsed,
             ),
           )
+        }
         [#(id, name), ..rest] -> {
           let result =
             turn.ToolResult(
@@ -408,7 +470,15 @@ fn pending_disconnect(driver: Driver) -> Option(Driver) {
 
 fn start_trigger(driver: Driver, trigger: loop.Trigger) -> Driver {
   case trigger {
-    loop.CallLlm(conversation, _iteration) -> {
+    loop.CallLlm(conversation, iteration) -> {
+      emit(
+        driver.ctx.observe,
+        observe.LlmCallStarted(
+          iteration:,
+          provider: provider_string(driver.ctx.options),
+          model: options_model(driver.ctx.options),
+        ),
+      )
       let messages = conversation_messages(driver.ctx, conversation)
       let chat_req =
         chat.ClientRequest(
@@ -464,6 +534,7 @@ fn start_trigger(driver: Driver, trigger: loop.Trigger) -> Driver {
           decoder: sse_stream.new(),
           fsm: engine_stream.new_stream(provider),
           started_ms: clock.monotonic_ms(),
+          first_token_ms: None,
         )),
       )
     }
@@ -519,6 +590,7 @@ fn feed_events(
   case events {
     [] -> await(driver, state)
     [event, ..rest] -> {
+      let driver = observe_stream_event(driver, state.iteration, event)
       let #(state, dispatch) =
         loop.step(state, loop.FromStream(event, elapsed_ms(driver)))
       case dispatch {
@@ -530,6 +602,118 @@ fn feed_events(
       }
     }
   }
+}
+
+// Operational measurements for one stream event, emitted before the
+// loop sees it. First content latches TTFT (per call and per turn);
+// terminal events close out the call's timing. Pure bookkeeping — the
+// loop's state machine is untouched.
+fn observe_stream_event(
+  driver: Driver,
+  iteration: Int,
+  event: engine_stream.StreamEvent,
+) -> Driver {
+  case driver.pipeline, event {
+    Some(pipeline), engine_stream.TextDelta(_)
+    | Some(pipeline), engine_stream.ReasoningDelta(_)
+    | Some(pipeline), engine_stream.ToolCallStarted(..)
+    -> {
+      case pipeline.first_token_ms {
+        Some(_) -> driver
+        None -> {
+          let now = clock.monotonic_ms()
+          let ttft_ms = now - pipeline.started_ms
+          emit(driver.ctx.observe, observe.LlmFirstToken(iteration:, ttft_ms:))
+          let turn_ttft_ms = case driver.turn_ttft_ms {
+            Some(_) -> driver.turn_ttft_ms
+            None -> Some(ttft_ms)
+          }
+          Driver(
+            ..driver,
+            turn_ttft_ms:,
+            pipeline: Some(Pipeline(..pipeline, first_token_ms: Some(now))),
+          )
+        }
+      }
+    }
+
+    Some(pipeline), engine_stream.StreamFinished(_, usage, _) -> {
+      let now = clock.monotonic_ms()
+      let tokens_per_second = case pipeline.first_token_ms {
+        Some(first) -> {
+          let generation_ms = now - first
+          case generation_ms > 0 {
+            True ->
+              Some(
+                int.to_float(usage.output_tokens)
+                /. { int.to_float(generation_ms) /. 1000.0 },
+              )
+            False -> None
+          }
+        }
+        None -> None
+      }
+      emit(
+        driver.ctx.observe,
+        observe.LlmCallCompleted(
+          iteration:,
+          duration_ms: now - pipeline.started_ms,
+          ttft_ms: option.map(pipeline.first_token_ms, fn(first) {
+            first - pipeline.started_ms
+          }),
+          output_tokens: usage.output_tokens,
+          tokens_per_second:,
+        ),
+      )
+      driver
+    }
+
+    Some(_), engine_stream.StreamFailedEvent(error, _) ->
+      observe_failure(driver, iteration, error, elapsed_ms(driver))
+
+    _, _ -> driver
+  }
+}
+
+/// Longest an observer callback may run before its process is killed.
+/// Generous — callbacks should take microseconds — it exists so a wedged
+/// observer can't accumulate one live process per observation under
+/// sustained traffic.
+const observer_timeout_ms = 5000
+
+// Observations are fire-and-forget by contract, so each one runs in an
+// unlinked process: a blocking or crashing deployment observer must
+// never delay or break the turn, and the kill timer bounds how long a
+// misbehaving one can hold its process. Ordering between events is not
+// guaranteed; every event carries its own measurements.
+fn emit(observe_fn: fn(observe.Event) -> Nil, event: observe.Event) -> Nil {
+  let pid = process.spawn_unlinked(fn() { observe_fn(event) })
+  let _ = kill_after(observer_timeout_ms, pid)
+  Nil
+}
+
+/// `timer:kill_after/2` — sends the pid an untrappable kill when the
+/// timer fires; a no-op if the process already exited.
+@external(erlang, "timer", "kill_after")
+fn kill_after(after_ms: Int, pid: Pid) -> dynamic.Dynamic
+
+fn observe_failure(
+  driver: Driver,
+  iteration: Int,
+  error: engine_stream.ProviderError,
+  duration_ms: Int,
+) -> Driver {
+  let #(_, error_type) = engine_stream.classify(error)
+  emit(
+    driver.ctx.observe,
+    observe.LlmCallFailed(
+      iteration:,
+      error_type:,
+      error_detail: engine_stream.detail(error),
+      duration_ms:,
+    ),
+  )
+  driver
 }
 
 fn decode_chunk(
@@ -545,7 +729,13 @@ fn decode_chunk(
       case ssevents.push(pipeline.sse, bytes) {
         Error(_) ->
           apply_adapter_events(pipeline, [
-            engine_stream.StreamFailed(engine_stream.StreamProcessingFailed),
+            engine_stream.StreamFailed(
+              engine_stream.StreamProcessingFailed(Some(
+                "unparseable SSE frame ("
+                <> int.to_string(bit_array.byte_size(bytes))
+                <> " bytes)",
+              )),
+            ),
           ])
         Ok(#(sse, items)) ->
           list.fold(items, #(Pipeline(..pipeline, sse:), []), fn(acc, item) {
@@ -758,6 +948,14 @@ fn options_model(options: LlmOptions) -> String {
     OpenRouter(options) -> options.model
     Fireworks(options) -> options.model
     OpenAiEndpoint(options) -> options.model
+  }
+}
+
+fn provider_string(options: LlmOptions) -> String {
+  case options {
+    OpenRouter(_) -> "openrouter"
+    Fireworks(_) -> "fireworks"
+    OpenAiEndpoint(_) -> "openai_compatible"
   }
 }
 

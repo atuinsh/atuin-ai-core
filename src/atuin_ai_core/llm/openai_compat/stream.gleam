@@ -59,8 +59,15 @@ fn push_data(decoder: Decoder, data: String) -> #(Decoder, List(AdapterEvent)) {
     payload ->
       case json.parse(payload, chunk_decoder()) {
         Ok(chunk) -> apply_chunk(decoder, chunk)
-        Error(_) -> #(decoder, [
-          engine_stream.StreamFailed(engine_stream.StreamProcessingFailed),
+        Error(decode_error) -> #(decoder, [
+          engine_stream.StreamFailed(
+            engine_stream.StreamProcessingFailed(Some(
+              "undecodable provider chunk ("
+              <> int.to_string(string.byte_size(payload))
+              <> " bytes): "
+              <> describe_decode_error(decode_error),
+            )),
+          ),
         ])
       }
   }
@@ -76,7 +83,13 @@ type Chunk {
 }
 
 type ChunkError {
-  ChunkError(code: Option(Int))
+  ChunkError(
+    code: Option(Int),
+    message: Option(String),
+    /// OpenRouter names the upstream provider that raised the error in
+    /// `error.metadata.provider_name`; absent from native upstreams.
+    provider: Option(String),
+  )
 }
 
 type Delta {
@@ -165,10 +178,36 @@ fn close_open_tools(decoder: Decoder) -> #(Decoder, List(AdapterEvent)) {
 }
 
 fn map_error(error: ChunkError) -> engine_stream.ProviderError {
+  let detail = case error.provider, error.message {
+    Some(provider), Some(message) -> Some(provider <> ": " <> message)
+    None, Some(message) -> Some(message)
+    _, None -> None
+  }
   case error.code {
-    Some(429) -> engine_stream.RateLimited
-    Some(code) if code >= 500 -> engine_stream.Unavailable
-    _ -> engine_stream.GenerationFailed
+    Some(429) -> engine_stream.RateLimited(detail)
+    Some(code) if code >= 500 -> engine_stream.Unavailable(detail)
+    _ -> engine_stream.GenerationFailed(detail)
+  }
+}
+
+/// Structural summary of a chunk decode failure: field paths and expected
+/// types only, never payload content (which may carry model output).
+fn describe_decode_error(error: json.DecodeError) -> String {
+  case error {
+    json.UnexpectedEndOfInput -> "truncated JSON"
+    json.UnexpectedByte(_) -> "invalid JSON"
+    json.UnexpectedSequence(_) -> "invalid JSON"
+    json.UnableToDecode(errors) ->
+      case errors {
+        [] -> "chunk did not match the expected shape"
+        [decode.DecodeError(expected:, found:, path:), ..] -> {
+          let location = case path {
+            [] -> ""
+            path -> " at " <> string.join(path, ".")
+          }
+          "expected " <> expected <> ", found " <> found <> location
+        }
+      }
   }
 }
 
@@ -201,7 +240,27 @@ fn chunk_decoder() -> decode.Decoder(Chunk) {
 
 fn error_decoder() -> decode.Decoder(ChunkError) {
   use code <- decode.optional_field("code", None, lenient_code_decoder())
-  decode.success(ChunkError(code:))
+  use message <- decode.optional_field(
+    "message",
+    None,
+    decode.optional(decode.string),
+  )
+  use provider_nested <- decode.optional_field(
+    "metadata",
+    None,
+    decode.optional(metadata_decoder()),
+  )
+  let provider = option.flatten(provider_nested)
+  decode.success(ChunkError(code:, message:, provider:))
+}
+
+fn metadata_decoder() -> decode.Decoder(Option(String)) {
+  use provider <- decode.optional_field(
+    "provider_name",
+    None,
+    decode.optional(decode.string),
+  )
+  decode.success(provider)
 }
 
 /// The error code is documented as a number but arrives as a string from

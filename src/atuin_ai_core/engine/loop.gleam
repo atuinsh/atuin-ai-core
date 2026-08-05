@@ -25,7 +25,7 @@ import atuin_ai_core/engine/turn.{
 }
 import gleam/dynamic.{type Dynamic}
 import gleam/list
-import gleam/option.{type Option}
+import gleam/option.{type Option, None}
 
 const max_tool_iterations = 10
 
@@ -147,7 +147,7 @@ pub type Outcome {
   /// The turn paused for client tool execution; the client will continue
   /// the session with a new request.
   PausedForClientTools(usage: Usage)
-  Failed(error_type: String, usage: Usage)
+  Failed(error_type: String, error_detail: Option(String), usage: Usage)
   /// The client disconnected; the turn stopped after the in-flight
   /// generation. Billed for the usage that accrued, like `Success`.
   Cancelled(usage: Usage, summary: SessionSummary)
@@ -367,7 +367,11 @@ fn fail(
   finish(
     State(..state, stream: StreamErrored),
     sends: [SendError(message, code)],
-    outcome: Failed(error_type: error_type, usage: total),
+    outcome: Failed(
+      error_type: error_type,
+      error_detail: stream.detail(error),
+      usage: total,
+    ),
   )
 }
 
@@ -619,6 +623,7 @@ fn advance_iteration(state: State) -> #(State, Dispatch) {
         ],
         outcome: Failed(
           error_type: "max_tool_iterations",
+          error_detail: None,
           usage: state.accumulated_usage,
         ),
       )
@@ -723,37 +728,30 @@ fn count_user_messages(conversation: List(LoopMessage)) -> Int {
 }
 
 // Message, wire code, and recorded error_type for a provider failure.
+// Client messages stay generic; operator detail rides the ProviderError
+// into the Failed outcome separately. The code/error_type classification
+// is `engine/stream.classify`, shared with observability.
 fn describe_error(error: stream.ProviderError) -> #(String, String, String) {
+  let #(code, error_type) = stream.classify(error)
+  #(client_message(error, code), code, error_type)
+}
+
+fn client_message(error: stream.ProviderError, code: String) -> String {
   case error {
-    stream.RateLimited -> #(
-      "LLM rate limit exceeded, please retry",
-      "llm_rate_limit",
-      "llm_rate_limit",
-    )
-    stream.Unavailable -> #(
-      "LLM service temporarily unavailable",
-      "llm_unavailable",
-      "llm_unavailable",
-    )
-    stream.GenerationFailed -> #(
-      "Failed to generate response",
-      "generation_failed",
-      "generation_failed",
-    )
-    stream.StreamProcessingFailed | stream.InvalidToolInput(_, _) -> #(
-      "Failed to process LLM response",
-      "generation_failed",
-      "generation_failed",
-    )
-    stream.StreamCrashed -> #(
-      "Streaming error occurred",
-      "internal_error",
-      "internal_error",
-    )
-    stream.TransportFailed(detail) -> #(
-      "LLM request failed: " <> detail,
-      "upstream_error",
-      "upstream_error",
-    )
+    stream.RateLimited(..) -> "LLM rate limit exceeded, please retry"
+    stream.Unavailable(..) -> "LLM service temporarily unavailable"
+    stream.GenerationFailed(..) -> "Failed to generate response"
+    stream.StreamProcessingFailed(..) | stream.InvalidToolInput(_, _) ->
+      "Failed to process LLM response"
+    stream.StreamCrashed -> "Streaming error occurred"
+    // Transport detail can include a provider response body snippet, so
+    // it stays out of the client message like every other detail; a
+    // classified 429/5xx reads the same as its mid-stream equivalent.
+    stream.TransportFailed(_) ->
+      case code {
+        "llm_rate_limit" -> "LLM rate limit exceeded, please retry"
+        "llm_unavailable" -> "LLM service temporarily unavailable"
+        _ -> "LLM request failed, please retry"
+      }
   }
 }

@@ -15,6 +15,7 @@ import atuin_ai_core/http/streaming
 import atuin_ai_core/http/trace
 import atuin_ai_core/http/trace_payloads
 import atuin_ai_core/instance.{type Instance, type RequestEnv}
+import atuin_ai_core/observe
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/int
@@ -113,7 +114,16 @@ pub fn serve(
     // recorded as usage — nothing was generated. Failures *during* a turn
     // are recorded by record_outcome via the Failed outcome.
     Error(ChatControllerPhaseError(phase, error)) -> {
-      log.error("Error during request: " <> string.inspect(error))
+      let phase_str = case phase {
+        PreStreaming -> "pre-stream"
+        PostStreaming -> "post-stream"
+      }
+      log.error(
+        "[cli_chat] request failed ("
+        <> phase_str
+        <> "): "
+        <> string.inspect(error),
+      )
 
       case error, phase {
         Disconnected, _ -> conn
@@ -251,6 +261,12 @@ fn do_chat(
           credits_payload(inst, trace_context, turn_usage)
         },
         content_policy: env.content_policy,
+        observe: fn(event) {
+          inst.observer.observe(observe.Observation(
+            context: trace_context,
+            event:,
+          ))
+        },
       ),
     )
 
@@ -317,6 +333,7 @@ fn record_outcome(
         result.responses,
         usage,
         Some(summary),
+        result.timing,
         cancelled: False,
       )
 
@@ -331,6 +348,7 @@ fn record_outcome(
         result.responses,
         usage,
         Some(summary),
+        result.timing,
         cancelled: True,
       )
 
@@ -343,17 +361,42 @@ fn record_outcome(
         result.responses,
         usage,
         None,
+        result.timing,
         cancelled: False,
       )
 
     // The error event was already streamed to the client; record the
     // failure (not charged — excluded from limits by success: false) with
     // whatever tokens the request consumed before dying.
-    loop.Failed(error_type:, usage:) ->
+    loop.Failed(error_type:, error_detail:, usage:) -> {
+      log.error(
+        "[cli_chat] turn failed"
+        <> " session_id="
+        <> context.session_id
+        <> " trace_id="
+        <> context.trace_id
+        <> " user_id="
+        <> context.user_id
+        <> " model="
+        <> context.model
+        <> " error_type="
+        <> error_type
+        // Provider-supplied — encoded so it can't forge log lines.
+        <> " detail="
+        <> log.escape(option.unwrap(error_detail, "(none)")),
+      )
       inst.recorder.failed(
         context,
-        instance.FailedTurn(error_type:, instruction:, usage: Some(usage)),
+        instance.FailedTurn(
+          error_type:,
+          error_detail:,
+          instruction:,
+          usage: Some(usage),
+          duration_ms: result.timing.duration_ms,
+          ttft_ms: result.timing.ttft_ms,
+        ),
       )
+    }
   }
 }
 
@@ -365,6 +408,7 @@ fn record_billed(
   responses: loop.Responses,
   turn_usage: Usage,
   summary: Option(turn.SessionSummary),
+  timing: driver.TurnTiming,
   cancelled cancelled: Bool,
 ) -> Nil {
   let billing.CostResult(computed:, missing_anthropic_pricing:) =
@@ -395,6 +439,8 @@ fn record_billed(
       tool_call_names: tool_call_names(responses),
       usage: turn_usage,
       billing: computed,
+      duration_ms: timing.duration_ms,
+      ttft_ms: timing.ttft_ms,
     ),
   )
 

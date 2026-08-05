@@ -11,6 +11,7 @@ import atuin_ai_core/domain/usage
 import atuin_ai_core/engine/turn
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
+import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -30,18 +31,73 @@ pub type AdapterEvent {
   StreamFailed(ProviderError)
 }
 
+/// The `detail` fields carry operator-facing context (provider error
+/// messages, structural decode failures) for logs and recorded failures.
+/// They never reach the client — `engine/loop.describe_error` keeps
+/// client messages generic — and they never carry user content: provider
+/// error messages are provider-generated, and decode failures render
+/// field paths and expected types only.
 pub type ProviderError {
-  RateLimited
-  Unavailable
-  GenerationFailed
-  StreamProcessingFailed
+  RateLimited(detail: Option(String))
+  Unavailable(detail: Option(String))
+  GenerationFailed(detail: Option(String))
+  StreamProcessingFailed(detail: Option(String))
   StreamCrashed
   /// The HTTP transport failed before or during the stream — a non-2xx
   /// response, a connect failure, or an inactivity cutoff. `detail` is
-  /// operator/user-facing (e.g. "HTTP 404 Not Found: model ... not
-  /// found") and rides into the error event and the recorded failure.
+  /// operator-facing (e.g. "HTTP 404 Not Found: model ... not found",
+  /// which may include a provider response body snippet) and rides into
+  /// the recorded failure.
   TransportFailed(detail: String)
   InvalidToolInput(tool_id: String, input_json: String)
+}
+
+/// The operator-facing detail an error carries, for logs and recorded
+/// failures. `StreamCrashed` has none — it means the driver itself broke.
+pub fn detail(error: ProviderError) -> Option(String) {
+  case error {
+    RateLimited(detail:)
+    | Unavailable(detail:)
+    | GenerationFailed(detail:)
+    | StreamProcessingFailed(detail:) -> detail
+    StreamCrashed -> None
+    TransportFailed(detail:) -> Some(detail)
+    InvalidToolInput(tool_id:, input_json:) ->
+      Some(
+        "malformed tool-call input for "
+        <> tool_id
+        <> " ("
+        <> int.to_string(string.byte_size(input_json))
+        <> " bytes)",
+      )
+  }
+}
+
+/// The wire code and recorded error_type for a failure. Shared between
+/// the loop (client error events, recorded failures) and observability,
+/// so a failure measures the same way it records.
+pub fn classify(error: ProviderError) -> #(String, String) {
+  case error {
+    RateLimited(..) -> #("llm_rate_limit", "llm_rate_limit")
+    Unavailable(..) -> #("llm_unavailable", "llm_unavailable")
+    GenerationFailed(..) | StreamProcessingFailed(..) | InvalidToolInput(..) -> #(
+      "generation_failed",
+      "generation_failed",
+    )
+    StreamCrashed -> #("internal_error", "internal_error")
+    TransportFailed(detail:) -> classify_transport(detail)
+  }
+}
+
+// Pre-stream non-2xx responses arrive from the dream_http_client shim as
+// "HTTP <status> <phrase>: <body snippet>"; recover the status class so a
+// provider 429/5xx classifies like its mid-stream equivalent.
+fn classify_transport(detail: String) -> #(String, String) {
+  case detail {
+    "HTTP 429" <> _ -> #("llm_rate_limit", "llm_rate_limit")
+    "HTTP 5" <> _ -> #("llm_unavailable", "llm_unavailable")
+    _ -> #("upstream_error", "upstream_error")
+  }
 }
 
 /// Fine-grained provider stream events consumed by the CLI chat lifecycle.
@@ -163,7 +219,9 @@ fn finish_tool_call(
       let state = StreamState(..state, finished: True)
       #(state, [
         StreamFailedEvent(
-          error: StreamProcessingFailed,
+          error: StreamProcessingFailed(Some(
+            "tool call stop for unknown index " <> int.to_string(index),
+          )),
           partial_usage: usage.extract_partial(
             state.usage_report,
             state.provider,

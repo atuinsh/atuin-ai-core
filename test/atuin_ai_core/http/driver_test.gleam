@@ -42,6 +42,7 @@ fn context(messages: List(request.Message)) -> driver.Context {
     trace: fn(_event) { Nil },
     credits: fn(_usage) { None },
     content_policy: trace.MetadataOnly,
+    observe: fn(_event) { Nil },
   )
 }
 
