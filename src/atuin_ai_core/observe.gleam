@@ -30,8 +30,9 @@ import gleam/int
 import gleam/option.{type Option, None, Some}
 
 /// Where observations go. Fire-and-forget: the driver runs every
-/// callback in an unlinked process, so a blocking or crashing observer
-/// can never delay or break a turn — and event ordering is not
+/// callback in an unlinked process with a kill timer, so a blocking or
+/// crashing observer can never delay or break a turn (a wedged callback
+/// is killed after a few seconds) — and event ordering is not
 /// guaranteed in exchange.
 pub type Observer {
   Observer(observe: fn(Observation) -> Nil)

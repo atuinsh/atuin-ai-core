@@ -129,8 +129,9 @@ pub type Context {
 pub type TurnTiming {
   TurnTiming(
     duration_ms: Int,
-    /// Time from the first LLM call's start to its first content; `None`
-    /// when the turn produced no content.
+    /// Time to the turn's first content, measured from the start of the
+    /// LLM call that produced it (usually the first; an earlier call can
+    /// finish contentless). `None` when the turn produced no content.
     ttft_ms: Option(Int),
   )
 }
@@ -674,14 +675,27 @@ fn observe_stream_event(
   }
 }
 
+/// Longest an observer callback may run before its process is killed.
+/// Generous — callbacks should take microseconds — it exists so a wedged
+/// observer can't accumulate one live process per observation under
+/// sustained traffic.
+const observer_timeout_ms = 5000
+
 // Observations are fire-and-forget by contract, so each one runs in an
 // unlinked process: a blocking or crashing deployment observer must
-// never delay or break the turn. Ordering between events is not
+// never delay or break the turn, and the kill timer bounds how long a
+// misbehaving one can hold its process. Ordering between events is not
 // guaranteed; every event carries its own measurements.
 fn emit(observe_fn: fn(observe.Event) -> Nil, event: observe.Event) -> Nil {
-  process.spawn_unlinked(fn() { observe_fn(event) })
+  let pid = process.spawn_unlinked(fn() { observe_fn(event) })
+  let _ = kill_after(observer_timeout_ms, pid)
   Nil
 }
+
+/// `timer:kill_after/2` — sends the pid an untrappable kill when the
+/// timer fires; a no-op if the process already exited.
+@external(erlang, "timer", "kill_after")
+fn kill_after(after_ms: Int, pid: Pid) -> dynamic.Dynamic
 
 fn observe_failure(
   driver: Driver,
