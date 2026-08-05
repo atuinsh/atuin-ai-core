@@ -126,12 +126,12 @@ pub fn provider_failure_reports_partial_usage_test() {
   let state = stream.new_stream(usage.Anthropic)
   let #(state, _events) = stream.update(state, stream.UsageChunk(report(10, 2)))
   let #(_state, events) =
-    stream.update(state, stream.StreamFailed(stream.Unavailable))
+    stream.update(state, stream.StreamFailed(stream.Unavailable(None)))
 
   assert events
     == [
       stream.StreamFailedEvent(
-        error: stream.Unavailable,
+        error: stream.Unavailable(None),
         partial_usage: Some(expected_usage(10, 2)),
       ),
     ]

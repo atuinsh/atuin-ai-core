@@ -37,6 +37,7 @@ import atuin_ai_core/llm/openai_compat/stream as sse_stream
 import atuin_ai_core/llm/openai_endpoint
 import atuin_ai_core/llm/openrouter
 import dream_http_client/client as dream
+import gleam/bit_array
 import gleam/bytes_tree
 import gleam/dynamic
 import gleam/erlang/process.{type Pid, type Subject}
@@ -545,7 +546,13 @@ fn decode_chunk(
       case ssevents.push(pipeline.sse, bytes) {
         Error(_) ->
           apply_adapter_events(pipeline, [
-            engine_stream.StreamFailed(engine_stream.StreamProcessingFailed),
+            engine_stream.StreamFailed(
+              engine_stream.StreamProcessingFailed(Some(
+                "unparseable SSE frame ("
+                <> int.to_string(bit_array.byte_size(bytes))
+                <> " bytes)",
+              )),
+            ),
           ])
         Ok(#(sse, items)) ->
           list.fold(items, #(Pipeline(..pipeline, sse:), []), fn(acc, item) {

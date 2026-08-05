@@ -113,7 +113,16 @@ pub fn serve(
     // recorded as usage — nothing was generated. Failures *during* a turn
     // are recorded by record_outcome via the Failed outcome.
     Error(ChatControllerPhaseError(phase, error)) -> {
-      log.error("Error during request: " <> string.inspect(error))
+      let phase_str = case phase {
+        PreStreaming -> "pre-stream"
+        PostStreaming -> "post-stream"
+      }
+      log.error(
+        "[cli_chat] request failed ("
+        <> phase_str
+        <> "): "
+        <> string.inspect(error),
+      )
 
       case error, phase {
         Disconnected, _ -> conn
@@ -349,11 +358,32 @@ fn record_outcome(
     // The error event was already streamed to the client; record the
     // failure (not charged — excluded from limits by success: false) with
     // whatever tokens the request consumed before dying.
-    loop.Failed(error_type:, usage:) ->
+    loop.Failed(error_type:, error_detail:, usage:) -> {
+      log.error(
+        "[cli_chat] turn failed"
+        <> " session_id="
+        <> context.session_id
+        <> " trace_id="
+        <> context.trace_id
+        <> " user_id="
+        <> context.user_id
+        <> " model="
+        <> context.model
+        <> " error_type="
+        <> error_type
+        <> " detail="
+        <> option.unwrap(error_detail, "(none)"),
+      )
       inst.recorder.failed(
         context,
-        instance.FailedTurn(error_type:, instruction:, usage: Some(usage)),
+        instance.FailedTurn(
+          error_type:,
+          error_detail:,
+          instruction:,
+          usage: Some(usage),
+        ),
       )
+    }
   }
 }
 

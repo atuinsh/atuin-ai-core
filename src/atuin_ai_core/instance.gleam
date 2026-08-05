@@ -154,10 +154,13 @@ pub type BilledTurn {
 }
 
 /// A failed turn — not charged, but kept with whatever tokens were
-/// consumed before the failure.
+/// consumed before the failure. `error_detail` is the operator-facing
+/// context the provider/transport supplied (never user content); the
+/// client only ever sees the generic message for `error_type`.
 pub type FailedTurn {
   FailedTurn(
     error_type: String,
+    error_detail: Option(String),
     instruction: Option(String),
     usage: Option(Usage),
   )

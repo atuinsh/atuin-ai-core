@@ -285,7 +285,11 @@ pub fn empty_responses_hit_iteration_cap_test() {
       EmitTrace(_),
       SendError("Max tool execution limit reached", "generation_failed"),
     ],
-    outcome: Failed(error_type: "max_tool_iterations", usage: total),
+    outcome: Failed(
+      error_type: "max_tool_iterations",
+      error_detail: None,
+      usage: total,
+    ),
   ) = dispatch
   // All ten calls' usage accumulated
   assert total.input_tokens == 10
@@ -414,25 +418,25 @@ pub fn mixed_tools_run_server_then_hand_off_test() {
 pub fn llm_failures_map_to_errors_test() {
   let cases = [
     #(
-      stream.RateLimited,
+      stream.RateLimited(None),
       "LLM rate limit exceeded, please retry",
       "llm_rate_limit",
       "llm_rate_limit",
     ),
     #(
-      stream.Unavailable,
+      stream.Unavailable(None),
       "LLM service temporarily unavailable",
       "llm_unavailable",
       "llm_unavailable",
     ),
     #(
-      stream.GenerationFailed,
+      stream.GenerationFailed(None),
       "Failed to generate response",
       "generation_failed",
       "generation_failed",
     ),
     #(
-      stream.StreamProcessingFailed,
+      stream.StreamProcessingFailed(None),
       "Failed to process LLM response",
       "generation_failed",
       "generation_failed",
@@ -453,6 +457,7 @@ pub fn llm_failures_map_to_errors_test() {
 
   list.each(cases, fn(test_case) {
     let #(error, message, code, error_type) = test_case
+    let expected_detail = stream.detail(error)
     let #(state, _) = loop.start("sess", conversation(), server_tools)
     let #(state, dispatch) =
       loop.step(
@@ -463,9 +468,69 @@ pub fn llm_failures_map_to_errors_test() {
     assert dispatch
       == Terminal(
         sends: [SendError(message, code)],
-        outcome: Failed(error_type: error_type, usage: usage.zero()),
+        outcome: Failed(
+          error_type: error_type,
+          error_detail: expected_detail,
+          usage: usage.zero(),
+        ),
       )
   })
+}
+
+pub fn transport_failures_classify_by_http_status_test() {
+  // The dream_http_client shim formats pre-stream non-2xx responses as
+  // "HTTP <status> <phrase>: <body>"; 429/5xx classify like their
+  // mid-stream equivalents, everything else stays a generic upstream error.
+  let cases = [
+    #("HTTP 429 Too Many Requests: slow down", "llm_rate_limit"),
+    #("HTTP 500 Internal Server Error: boom", "llm_unavailable"),
+    #("HTTP 502 Bad Gateway: nope", "llm_unavailable"),
+    #("HTTP 400 Bad Request: bad input", "upstream_error"),
+    #("connection refused", "upstream_error"),
+  ]
+
+  list.each(cases, fn(test_case) {
+    let #(detail, expected_type) = test_case
+    let #(state, _) = loop.start("sess", conversation(), server_tools)
+    let #(_, dispatch) =
+      loop.step(
+        state,
+        FromStream(
+          stream.StreamFailedEvent(
+            stream.TransportFailed(detail),
+            partial_usage: None,
+          ),
+          5,
+        ),
+      )
+    let assert Terminal(
+      sends: [SendError("LLM request failed: " <> _, code)],
+      outcome: Failed(error_type:, error_detail: Some(recorded), usage: _),
+    ) = dispatch
+    assert error_type == expected_type
+    assert code == expected_type
+    assert recorded == detail
+  })
+}
+
+pub fn provider_error_detail_reaches_failed_outcome_test() {
+  let #(state, _) = loop.start("sess", conversation(), server_tools)
+  let #(_, dispatch) =
+    loop.step(
+      state,
+      FromStream(
+        stream.StreamFailedEvent(
+          stream.RateLimited(Some("openai: slow down")),
+          partial_usage: None,
+        ),
+        5,
+      ),
+    )
+  // The client message stays generic; the provider's detail is recorded.
+  let assert Terminal(
+    sends: [SendError("LLM rate limit exceeded, please retry", _)],
+    outcome: Failed(error_detail: Some("openai: slow down"), ..),
+  ) = dispatch
 }
 
 pub fn llm_failure_rolls_up_partial_usage_test() {
@@ -484,14 +549,16 @@ pub fn llm_failure_rolls_up_partial_usage_test() {
       state,
       FromStream(
         stream.StreamFailedEvent(
-          error: stream.GenerationFailed,
+          error: stream.GenerationFailed(None),
           partial_usage: Some(some_usage(4, 0)),
         ),
         5,
       ),
     )
-  let assert Terminal(sends: _, outcome: Failed(error_type: _, usage: total)) =
-    dispatch
+  let assert Terminal(
+    sends: _,
+    outcome: Failed(error_type: _, error_detail: _, usage: total),
+  ) = dispatch
   assert total.input_tokens == 14
   assert total.output_tokens == 5
 }
@@ -604,7 +671,7 @@ pub fn disconnect_mutes_stream_failure_error_send_test() {
       state,
       FromStream(
         stream.StreamFailedEvent(
-          error: stream.Unavailable,
+          error: stream.Unavailable(None),
           partial_usage: Some(some_usage(3, 0)),
         ),
         9,
@@ -614,7 +681,11 @@ pub fn disconnect_mutes_stream_failure_error_send_test() {
   assert dispatch
     == Terminal(
       sends: [],
-      outcome: Failed(error_type: "llm_unavailable", usage: some_usage(3, 0)),
+      outcome: Failed(
+        error_type: "llm_unavailable",
+        error_detail: None,
+        usage: some_usage(3, 0),
+      ),
     )
 }
 
