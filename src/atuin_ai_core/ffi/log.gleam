@@ -20,10 +20,11 @@ pub fn debug(message: String) -> Nil
 
 /// Encodes an untrusted value (e.g. a provider-supplied error message)
 /// for safe interpolation into a log line: common whitespace controls
-/// become visible escapes and every other C0/DEL control character is
-/// dropped, so the value can't forge additional log lines or inject
-/// terminal control sequences. Apply at the log site — stored copies
-/// (usage records, traces) keep the raw value.
+/// become visible escapes and every other C0, DEL, or C1 control
+/// character is dropped, so the value can't forge additional log lines
+/// or inject terminal control sequences (C1 covers single-byte CSI,
+/// U+009B, which terminals treat like `ESC [`). Apply at the log site —
+/// stored copies (usage records, traces) keep the raw value.
 pub fn escape(value: String) -> String {
   value
   |> string.replace("\n", "\\n")
@@ -32,7 +33,7 @@ pub fn escape(value: String) -> String {
   |> string.to_utf_codepoints
   |> list.filter(fn(cp) {
     let n = string.utf_codepoint_to_int(cp)
-    n >= 0x20 && n != 0x7F
+    n >= 0x20 && n != 0x7F && !{ n >= 0x80 && n <= 0x9F }
   })
   |> string.from_utf_codepoints
 }
