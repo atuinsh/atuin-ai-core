@@ -54,6 +54,23 @@ import ssevents
 /// blackholed upstream can't hold the request open forever.
 const inactivity_timeout_ms = 60_000
 
+/// Ceiling on a single LLM stream, start to finish. dream applies its
+/// timeout to the whole httpc request as well as to each chunk receive,
+/// so this is a total-duration cap, not an idle one — a long-but-healthy
+/// generation must stay under it. It has to be set explicitly: dream's
+/// default is 30s, which is well inside the range of a normal
+/// tool-heavy turn and shorter than `inactivity_timeout_ms`, so leaving
+/// it unset kills live streams with a bare "timeout" before the driver's
+/// own watchdog ever gets a say. Stalled (as opposed to slow) streams
+/// are `inactivity_timeout_ms`'s job.
+///
+/// Not set arbitrarily high: killing the stream task (supersede, client
+/// disconnect, deadline) does not cancel the request, because dream's
+/// yielder API has no cancel and its httpc owner process is unlinked.
+/// That owner and its socket survive until this timeout expires, so the
+/// value is also how long an abandoned stream lingers.
+const llm_stream_timeout_ms = 300_000
+
 /// Which LLM backend serves this turn, with that adapter's options. All
 /// backends share the OpenAI-compatible wire shape and SSE decoding;
 /// only request preparation differs.
@@ -426,7 +443,8 @@ fn start_trigger(driver: Driver, trigger: loop.Trigger) -> Driver {
       let inbox = driver.inbox
       let task =
         process.spawn_unlinked(fn() {
-          dream.stream_yielder(req.inner)
+          dream.timeout(req.inner, llm_stream_timeout_ms)
+          |> dream.stream_yielder
           |> yielder.each(fn(chunk) {
             let chunk = case chunk {
               Ok(tree) -> Ok(bytes_tree.to_bit_array(tree))
