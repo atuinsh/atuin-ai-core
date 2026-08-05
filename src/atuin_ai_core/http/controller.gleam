@@ -15,6 +15,7 @@ import atuin_ai_core/http/streaming
 import atuin_ai_core/http/trace
 import atuin_ai_core/http/trace_payloads
 import atuin_ai_core/instance.{type Instance, type RequestEnv}
+import atuin_ai_core/observe
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/int
@@ -260,6 +261,12 @@ fn do_chat(
           credits_payload(inst, trace_context, turn_usage)
         },
         content_policy: env.content_policy,
+        observe: fn(event) {
+          inst.observer.observe(observe.Observation(
+            context: trace_context,
+            event:,
+          ))
+        },
       ),
     )
 
@@ -326,6 +333,7 @@ fn record_outcome(
         result.responses,
         usage,
         Some(summary),
+        result.timing,
         cancelled: False,
       )
 
@@ -340,6 +348,7 @@ fn record_outcome(
         result.responses,
         usage,
         Some(summary),
+        result.timing,
         cancelled: True,
       )
 
@@ -352,6 +361,7 @@ fn record_outcome(
         result.responses,
         usage,
         None,
+        result.timing,
         cancelled: False,
       )
 
@@ -382,6 +392,8 @@ fn record_outcome(
           error_detail:,
           instruction:,
           usage: Some(usage),
+          duration_ms: result.timing.duration_ms,
+          ttft_ms: result.timing.ttft_ms,
         ),
       )
     }
@@ -396,6 +408,7 @@ fn record_billed(
   responses: loop.Responses,
   turn_usage: Usage,
   summary: Option(turn.SessionSummary),
+  timing: driver.TurnTiming,
   cancelled cancelled: Bool,
 ) -> Nil {
   let billing.CostResult(computed:, missing_anthropic_pricing:) =
@@ -426,6 +439,8 @@ fn record_billed(
       tool_call_names: tool_call_names(responses),
       usage: turn_usage,
       billing: computed,
+      duration_ms: timing.duration_ms,
+      ttft_ms: timing.ttft_ms,
     ),
   )
 

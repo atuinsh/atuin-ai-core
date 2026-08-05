@@ -73,6 +73,33 @@ pub fn detail(error: ProviderError) -> Option(String) {
   }
 }
 
+/// The wire code and recorded error_type for a failure. Shared between
+/// the loop (client error events, recorded failures) and observability,
+/// so a failure measures the same way it records.
+pub fn classify(error: ProviderError) -> #(String, String) {
+  case error {
+    RateLimited(..) -> #("llm_rate_limit", "llm_rate_limit")
+    Unavailable(..) -> #("llm_unavailable", "llm_unavailable")
+    GenerationFailed(..) | StreamProcessingFailed(..) | InvalidToolInput(..) -> #(
+      "generation_failed",
+      "generation_failed",
+    )
+    StreamCrashed -> #("internal_error", "internal_error")
+    TransportFailed(detail:) -> classify_transport(detail)
+  }
+}
+
+// Pre-stream non-2xx responses arrive from the dream_http_client shim as
+// "HTTP <status> <phrase>: <body snippet>"; recover the status class so a
+// provider 429/5xx classifies like its mid-stream equivalent.
+fn classify_transport(detail: String) -> #(String, String) {
+  case detail {
+    "HTTP 429" <> _ -> #("llm_rate_limit", "llm_rate_limit")
+    "HTTP 5" <> _ -> #("llm_unavailable", "llm_unavailable")
+    _ -> #("upstream_error", "upstream_error")
+  }
+}
+
 /// Fine-grained provider stream events consumed by the CLI chat lifecycle.
 pub type StreamEvent {
   TextDelta(text: String)

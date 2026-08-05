@@ -2,6 +2,7 @@ import atuin_ai_core/domain/usage
 import atuin_ai_core/engine/stream
 import atuin_ai_core/engine/turn
 import gleam/dynamic/decode
+import gleam/list
 import gleam/option.{None, Some}
 
 fn report(input: Int, output: Int) -> usage.UsageReport {
@@ -155,4 +156,30 @@ pub fn invalid_tool_input_fails_stream_test() {
 
   let #(_state, events) = stream.update(state, stream.TextChunk("ignored"))
   assert events == []
+}
+
+pub fn classify_maps_errors_to_wire_code_and_type_test() {
+  let cases = [
+    #(stream.RateLimited(None), "llm_rate_limit"),
+    #(stream.Unavailable(None), "llm_unavailable"),
+    #(stream.GenerationFailed(None), "generation_failed"),
+    #(stream.StreamProcessingFailed(None), "generation_failed"),
+    #(stream.InvalidToolInput("tc_1", "{"), "generation_failed"),
+    #(stream.StreamCrashed, "internal_error"),
+    // Pre-stream non-2xx bodies classify by their HTTP status
+    #(stream.TransportFailed("HTTP 429 Too Many Requests: x"), "llm_rate_limit"),
+    #(
+      stream.TransportFailed("HTTP 503 Service Unavailable: x"),
+      "llm_unavailable",
+    ),
+    #(stream.TransportFailed("HTTP 400 Bad Request: x"), "upstream_error"),
+    #(stream.TransportFailed("connection refused"), "upstream_error"),
+  ]
+
+  list.each(cases, fn(test_case) {
+    let #(error, expected) = test_case
+    let #(code, error_type) = stream.classify(error)
+    assert code == expected
+    assert error_type == expected
+  })
 }

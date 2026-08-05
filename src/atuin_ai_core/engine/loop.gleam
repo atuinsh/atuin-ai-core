@@ -729,57 +729,29 @@ fn count_user_messages(conversation: List(LoopMessage)) -> Int {
 
 // Message, wire code, and recorded error_type for a provider failure.
 // Client messages stay generic; operator detail rides the ProviderError
-// into the Failed outcome separately.
+// into the Failed outcome separately. The code/error_type classification
+// is `engine/stream.classify`, shared with observability.
 fn describe_error(error: stream.ProviderError) -> #(String, String, String) {
+  let #(code, error_type) = stream.classify(error)
+  #(client_message(error, code), code, error_type)
+}
+
+fn client_message(error: stream.ProviderError, code: String) -> String {
   case error {
-    stream.RateLimited(..) -> #(
-      "LLM rate limit exceeded, please retry",
-      "llm_rate_limit",
-      "llm_rate_limit",
-    )
-    stream.Unavailable(..) -> #(
-      "LLM service temporarily unavailable",
-      "llm_unavailable",
-      "llm_unavailable",
-    )
-    stream.GenerationFailed(..) -> #(
-      "Failed to generate response",
-      "generation_failed",
-      "generation_failed",
-    )
-    stream.StreamProcessingFailed(..) | stream.InvalidToolInput(_, _) -> #(
-      "Failed to process LLM response",
-      "generation_failed",
-      "generation_failed",
-    )
-    stream.StreamCrashed -> #(
-      "Streaming error occurred",
-      "internal_error",
-      "internal_error",
-    )
+    stream.RateLimited(..) -> "LLM rate limit exceeded, please retry"
+    stream.Unavailable(..) -> "LLM service temporarily unavailable"
+    stream.GenerationFailed(..) -> "Failed to generate response"
+    stream.StreamProcessingFailed(..) | stream.InvalidToolInput(_, _) ->
+      "Failed to process LLM response"
+    stream.StreamCrashed -> "Streaming error occurred"
     // Transport detail can include a provider response body snippet, so
     // it stays out of the client message like every other detail; a
     // classified 429/5xx reads the same as its mid-stream equivalent.
-    stream.TransportFailed(detail) -> {
-      let #(code, error_type) = classify_transport(detail)
-      let message = case code {
+    stream.TransportFailed(_) ->
+      case code {
         "llm_rate_limit" -> "LLM rate limit exceeded, please retry"
         "llm_unavailable" -> "LLM service temporarily unavailable"
         _ -> "LLM request failed, please retry"
       }
-      #(message, code, error_type)
-    }
-  }
-}
-
-// Pre-stream non-2xx responses arrive from the dream_http_client shim as
-// "HTTP <status> <phrase>: <body snippet>"; recover the status class so a
-// provider 429/5xx records like its mid-stream equivalent instead of a
-// generic upstream error.
-fn classify_transport(detail: String) -> #(String, String) {
-  case detail {
-    "HTTP 429" <> _ -> #("llm_rate_limit", "llm_rate_limit")
-    "HTTP 5" <> _ -> #("llm_unavailable", "llm_unavailable")
-    _ -> #("upstream_error", "upstream_error")
   }
 }
