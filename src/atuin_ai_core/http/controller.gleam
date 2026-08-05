@@ -371,8 +371,9 @@ fn record_outcome(
         <> context.model
         <> " error_type="
         <> error_type
+        // Provider-supplied — encoded so it can't forge log lines.
         <> " detail="
-        <> option.unwrap(error_detail, "(none)"),
+        <> log.escape(option.unwrap(error_detail, "(none)")),
       )
       inst.recorder.failed(
         context,
