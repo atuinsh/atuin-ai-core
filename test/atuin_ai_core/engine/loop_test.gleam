@@ -481,16 +481,38 @@ pub fn transport_failures_classify_by_http_status_test() {
   // The dream_http_client shim formats pre-stream non-2xx responses as
   // "HTTP <status> <phrase>: <body>"; 429/5xx classify like their
   // mid-stream equivalents, everything else stays a generic upstream error.
+  // The detail (which may include a provider body snippet) is recorded,
+  // never sent to the client.
   let cases = [
-    #("HTTP 429 Too Many Requests: slow down", "llm_rate_limit"),
-    #("HTTP 500 Internal Server Error: boom", "llm_unavailable"),
-    #("HTTP 502 Bad Gateway: nope", "llm_unavailable"),
-    #("HTTP 400 Bad Request: bad input", "upstream_error"),
-    #("connection refused", "upstream_error"),
+    #(
+      "HTTP 429 Too Many Requests: slow down",
+      "llm_rate_limit",
+      "LLM rate limit exceeded, please retry",
+    ),
+    #(
+      "HTTP 500 Internal Server Error: boom",
+      "llm_unavailable",
+      "LLM service temporarily unavailable",
+    ),
+    #(
+      "HTTP 502 Bad Gateway: nope",
+      "llm_unavailable",
+      "LLM service temporarily unavailable",
+    ),
+    #(
+      "HTTP 400 Bad Request: bad input",
+      "upstream_error",
+      "LLM request failed, please retry",
+    ),
+    #(
+      "connection refused",
+      "upstream_error",
+      "LLM request failed, please retry",
+    ),
   ]
 
   list.each(cases, fn(test_case) {
-    let #(detail, expected_type) = test_case
+    let #(detail, expected_type, expected_message) = test_case
     let #(state, _) = loop.start("sess", conversation(), server_tools)
     let #(_, dispatch) =
       loop.step(
@@ -504,9 +526,10 @@ pub fn transport_failures_classify_by_http_status_test() {
         ),
       )
     let assert Terminal(
-      sends: [SendError("LLM request failed: " <> _, code)],
+      sends: [SendError(message, code)],
       outcome: Failed(error_type:, error_detail: Some(recorded), usage: _),
     ) = dispatch
+    assert message == expected_message
     assert error_type == expected_type
     assert code == expected_type
     assert recorded == detail

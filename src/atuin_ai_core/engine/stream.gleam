@@ -45,8 +45,9 @@ pub type ProviderError {
   StreamCrashed
   /// The HTTP transport failed before or during the stream — a non-2xx
   /// response, a connect failure, or an inactivity cutoff. `detail` is
-  /// operator/user-facing (e.g. "HTTP 404 Not Found: model ... not
-  /// found") and rides into the error event and the recorded failure.
+  /// operator-facing (e.g. "HTTP 404 Not Found: model ... not found",
+  /// which may include a provider response body snippet) and rides into
+  /// the recorded failure.
   TransportFailed(detail: String)
   InvalidToolInput(tool_id: String, input_json: String)
 }

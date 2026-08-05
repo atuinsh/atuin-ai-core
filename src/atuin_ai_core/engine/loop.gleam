@@ -757,9 +757,17 @@ fn describe_error(error: stream.ProviderError) -> #(String, String, String) {
       "internal_error",
       "internal_error",
     )
+    // Transport detail can include a provider response body snippet, so
+    // it stays out of the client message like every other detail; a
+    // classified 429/5xx reads the same as its mid-stream equivalent.
     stream.TransportFailed(detail) -> {
       let #(code, error_type) = classify_transport(detail)
-      #("LLM request failed: " <> detail, code, error_type)
+      let message = case code {
+        "llm_rate_limit" -> "LLM rate limit exceeded, please retry"
+        "llm_unavailable" -> "LLM service temporarily unavailable"
+        _ -> "LLM request failed, please retry"
+      }
+      #(message, code, error_type)
     }
   }
 }
