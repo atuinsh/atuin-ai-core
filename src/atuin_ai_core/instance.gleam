@@ -151,8 +151,9 @@ pub type BilledTurn {
     tool_call_names: List(String),
     usage: Usage,
     billing: billing.Computed,
-    /// Turn wall-clock duration and time to the first token of the first
-    /// LLM call (`None` if the turn produced no content).
+    /// Turn wall-clock duration and time to the turn's first content
+    /// token, measured from the start of the LLM call that produced it
+    /// (`None` if the turn produced no content).
     duration_ms: Int,
     ttft_ms: Option(Int),
   )
