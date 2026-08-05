@@ -29,7 +29,10 @@ import gleam/float
 import gleam/int
 import gleam/option.{type Option, None, Some}
 
-/// Where observations go. All best-effort and fire-and-forget.
+/// Where observations go. Fire-and-forget: the driver runs every
+/// callback in an unlinked process, so a blocking or crashing observer
+/// can never delay or break a turn — and event ordering is not
+/// guaranteed in exchange.
 pub type Observer {
   Observer(observe: fn(Observation) -> Nil)
 }
@@ -104,8 +107,9 @@ pub fn logging_observer() -> Observer {
           <> int.to_string(iteration)
           <> " error_type="
           <> error_type
+          // Provider-supplied — encoded so it can't forge log lines.
           <> " detail="
-          <> option_unwrap(error_detail)
+          <> log.escape(option_unwrap(error_detail))
           <> " duration_ms="
           <> int.to_string(duration_ms),
         )

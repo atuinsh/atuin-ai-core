@@ -188,12 +188,17 @@ pub fn run(conn: PlugConn, ctx: Context) -> TurnResult {
 
   let #(driver, outcome, responses) = drive(driver, state, dispatch)
   let duration_ms = clock.monotonic_ms() - driver.started_ms
-  ctx.observe(observe.TurnCompleted(
-    outcome: outcome_name(outcome),
-    duration_ms:,
-    llm_calls: driver.stream_id,
-  ))
-  kill_in_flight(driver)
+  // Cleanup before the final observation: the observer is fault-isolated
+  // (see emit), but stream/tool tasks shouldn't outlive the turn even so.
+  let driver = kill_in_flight(driver)
+  emit(
+    ctx.observe,
+    observe.TurnCompleted(
+      outcome: outcome_name(outcome),
+      duration_ms:,
+      llm_calls: driver.stream_id,
+    ),
+  )
   TurnResult(
     conn: driver.conn,
     outcome:,
@@ -336,11 +341,14 @@ fn await(
     Ok(StreamExhausted(_)) -> await(driver, state)
 
     Ok(ToolDone(result, duration_ms)) -> {
-      driver.ctx.observe(observe.ServerToolCompleted(
-        name: result.name,
-        duration_ms:,
-        is_error: result.is_error,
-      ))
+      emit(
+        driver.ctx.observe,
+        observe.ServerToolCompleted(
+          name: result.name,
+          duration_ms:,
+          is_error: result.is_error,
+        ),
+      )
       let driver =
         Driver(
           ..driver,
@@ -462,11 +470,14 @@ fn pending_disconnect(driver: Driver) -> Option(Driver) {
 fn start_trigger(driver: Driver, trigger: loop.Trigger) -> Driver {
   case trigger {
     loop.CallLlm(conversation, iteration) -> {
-      driver.ctx.observe(observe.LlmCallStarted(
-        iteration:,
-        provider: provider_string(driver.ctx.options),
-        model: options_model(driver.ctx.options),
-      ))
+      emit(
+        driver.ctx.observe,
+        observe.LlmCallStarted(
+          iteration:,
+          provider: provider_string(driver.ctx.options),
+          model: options_model(driver.ctx.options),
+        ),
+      )
       let messages = conversation_messages(driver.ctx, conversation)
       let chat_req =
         chat.ClientRequest(
@@ -611,7 +622,7 @@ fn observe_stream_event(
         None -> {
           let now = clock.monotonic_ms()
           let ttft_ms = now - pipeline.started_ms
-          driver.ctx.observe(observe.LlmFirstToken(iteration:, ttft_ms:))
+          emit(driver.ctx.observe, observe.LlmFirstToken(iteration:, ttft_ms:))
           let turn_ttft_ms = case driver.turn_ttft_ms {
             Some(_) -> driver.turn_ttft_ms
             None -> Some(ttft_ms)
@@ -641,15 +652,18 @@ fn observe_stream_event(
         }
         None -> None
       }
-      driver.ctx.observe(observe.LlmCallCompleted(
-        iteration:,
-        duration_ms: now - pipeline.started_ms,
-        ttft_ms: option.map(pipeline.first_token_ms, fn(first) {
-          first - pipeline.started_ms
-        }),
-        output_tokens: usage.output_tokens,
-        tokens_per_second:,
-      ))
+      emit(
+        driver.ctx.observe,
+        observe.LlmCallCompleted(
+          iteration:,
+          duration_ms: now - pipeline.started_ms,
+          ttft_ms: option.map(pipeline.first_token_ms, fn(first) {
+            first - pipeline.started_ms
+          }),
+          output_tokens: usage.output_tokens,
+          tokens_per_second:,
+        ),
+      )
       driver
     }
 
@@ -660,6 +674,15 @@ fn observe_stream_event(
   }
 }
 
+// Observations are fire-and-forget by contract, so each one runs in an
+// unlinked process: a blocking or crashing deployment observer must
+// never delay or break the turn. Ordering between events is not
+// guaranteed; every event carries its own measurements.
+fn emit(observe_fn: fn(observe.Event) -> Nil, event: observe.Event) -> Nil {
+  process.spawn_unlinked(fn() { observe_fn(event) })
+  Nil
+}
+
 fn observe_failure(
   driver: Driver,
   iteration: Int,
@@ -667,12 +690,15 @@ fn observe_failure(
   duration_ms: Int,
 ) -> Driver {
   let #(_, error_type) = engine_stream.classify(error)
-  driver.ctx.observe(observe.LlmCallFailed(
-    iteration:,
-    error_type:,
-    error_detail: engine_stream.detail(error),
-    duration_ms:,
-  ))
+  emit(
+    driver.ctx.observe,
+    observe.LlmCallFailed(
+      iteration:,
+      error_type:,
+      error_detail: engine_stream.detail(error),
+      duration_ms:,
+    ),
+  )
   driver
 }
 
