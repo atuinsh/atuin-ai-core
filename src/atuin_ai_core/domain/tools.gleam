@@ -142,6 +142,12 @@ get context from configuration files, code files, or any relevant text files
 that can help you understand the user's environment and provide better
 suggestions, answers, or assistance. Each line is prefixed with its line
 number in the file, starting from 1, followed by a `\\t` (tab) character.
+
+Do NOT re-read a file you have already read just to check whether it changed —
+not even at the start of a new turn. File state is tracked for you: if a file
+changed after you read it, edit_file fails with an error telling you to read
+it again. Re-read only after that error, or to see content you have not read
+yet (such as a different line range).
 ",
     parameter_schema: JsonSchema(
       schema.object([
@@ -193,7 +199,9 @@ where preserving comments, formatting, and key ordering matters. For creating
 new files, use write_file instead.
 
 If you get an error saying the file was modified since read, call read_file
-again to get the current contents before retrying the edit.
+again to get the current contents before retrying the edit. Do not re-read
+files preemptively to guard against this error — attempt the edit first; the
+error is the signal to re-read.
 ",
     parameter_schema: JsonSchema(
       schema.object([
